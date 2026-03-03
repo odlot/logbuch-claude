@@ -132,7 +132,31 @@ pub fn draw(frame: &mut Frame, app: &App, task_id: i64) {
         Style::default().fg(Color::DarkGray)
     };
 
-    let session_title = format!(" Sessions ({}) ", app.sessions.len());
+    let total_minutes: i64 = app
+        .sessions
+        .iter()
+        .map(|s| {
+            if let Some(end) = s.end_at {
+                (end - s.begin_at).num_minutes()
+            } else {
+                s.duration_min as i64
+            }
+        })
+        .sum();
+    let session_title = if total_minutes >= 60 {
+        format!(
+            " Sessions ({}, {}h {}m) ",
+            app.sessions.len(),
+            total_minutes / 60,
+            total_minutes % 60
+        )
+    } else {
+        format!(
+            " Sessions ({}, {}m) ",
+            app.sessions.len(),
+            total_minutes
+        )
+    };
     let session_block = Block::default()
         .title(session_title)
         .borders(Borders::ALL)
@@ -148,7 +172,12 @@ pub fn draw(frame: &mut Frame, app: &App, task_id: i64) {
                 .end_at
                 .map(|e| e.format("%H:%M").to_string())
                 .unwrap_or_else(|| "running".to_string());
-            let duration = format!("{}m", session.duration_min);
+            let duration = if let Some(end_at) = session.end_at {
+                let mins = (end_at - session.begin_at).num_minutes();
+                format!("{}m", mins)
+            } else {
+                format!("{}m", session.duration_min)
+            };
             let notes_preview = if session.notes.is_empty() {
                 String::new()
             } else {
@@ -192,6 +221,18 @@ pub fn draw(frame: &mut Frame, app: &App, task_id: i64) {
 }
 
 fn draw_detail_status(frame: &mut Frame, app: &App, area: Rect) {
+    // Session duration prompt replaces the status bar
+    if app.input_mode == InputMode::Editing && app.input_target == InputTarget::SessionDuration {
+        super::input::draw_input_line(
+            frame,
+            area,
+            "Session duration (min): ",
+            &app.input_buffer,
+            app.input_cursor,
+        );
+        return;
+    }
+
     let status_left = super::status_bar_text(app);
     let status_right = super::session_indicator(app).unwrap_or_default();
 
