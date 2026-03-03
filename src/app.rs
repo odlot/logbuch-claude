@@ -572,13 +572,20 @@ impl App {
 
     fn send_notification(&self) {
         let desc = &self.session_task_description;
-        let _ = notify_rust::Notification::new()
+        let mut notification = notify_rust::Notification::new();
+        notification
             .summary("Logbuch: Session Complete")
             .body(&format!("Pomodoro session finished for: {}", desc))
-            .icon("dialog-information")
-            .urgency(notify_rust::Urgency::Critical)
-            .timeout(notify_rust::Timeout::Never)
-            .show();
+            .icon("dialog-information");
+
+        #[cfg(target_os = "linux")]
+        {
+            notification
+                .urgency(notify_rust::Urgency::Critical)
+                .timeout(notify_rust::Timeout::Never);
+        }
+
+        let _ = notification.show();
     }
 
     pub fn session_remaining_secs(&self) -> Option<i64> {
