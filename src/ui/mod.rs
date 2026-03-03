@@ -84,11 +84,15 @@ fn draw_help_overlay(frame: &mut Frame, app: &App) {
 pub fn status_bar_text(app: &App) -> String {
     let mut parts = Vec::new();
 
-    // View name
+    // View name + keybinding hints
     match &app.view {
-        crate::app::View::Board => parts.push("Board".to_string()),
-        crate::app::View::TaskDetail(_) => parts.push("Task Detail".to_string()),
-        crate::app::View::ActiveSession(_) => parts.push("Session".to_string()),
+        crate::app::View::Board => {
+            parts.push("n:new  d:delete  H/L:move  Enter:open  ?:help".to_string())
+        }
+        crate::app::View::TaskDetail(_) => {
+            parts.push("e:edit  a:todo  x:toggle  s:session  Esc:back  ?:help".to_string())
+        }
+        crate::app::View::ActiveSession(_) => parts.push("Enter:note  Esc:end  ?:help".to_string()),
     };
 
     // Status message

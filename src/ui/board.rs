@@ -69,8 +69,23 @@ fn draw_column(frame: &mut Frame, app: &App, list: &TaskList, area: Rect) {
         })
         .collect();
 
+    let inner = block.inner(area);
     let list_widget = List::new(items).block(block);
     frame.render_widget(list_widget, area);
+
+    // Empty-state hint
+    if tasks.is_empty() && is_active {
+        let hint = Paragraph::new("Press n to add a task")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center);
+        let hint_area = Rect {
+            x: inner.x,
+            y: inner.y + inner.height / 2,
+            width: inner.width,
+            height: 1,
+        };
+        frame.render_widget(hint, hint_area);
+    }
 }
 
 fn draw_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
