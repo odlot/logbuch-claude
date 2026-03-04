@@ -155,6 +155,42 @@ pub fn delete_todo(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
+pub fn move_todo_up(conn: &Connection, id: i64, task_id: i64) -> Result<()> {
+    let todos = list_todos(conn, task_id)?;
+    let idx = match todos.iter().position(|t| t.id == id) {
+        Some(i) if i > 0 => i,
+        _ => return Ok(()),
+    };
+    let tx = conn;
+    tx.execute(
+        "UPDATE todo SET position = ?1 WHERE id = ?2",
+        params![todos[idx - 1].position, todos[idx].id],
+    )?;
+    tx.execute(
+        "UPDATE todo SET position = ?1 WHERE id = ?2",
+        params![todos[idx].position, todos[idx - 1].id],
+    )?;
+    Ok(())
+}
+
+pub fn move_todo_down(conn: &Connection, id: i64, task_id: i64) -> Result<()> {
+    let todos = list_todos(conn, task_id)?;
+    let idx = match todos.iter().position(|t| t.id == id) {
+        Some(i) if i + 1 < todos.len() => i,
+        _ => return Ok(()),
+    };
+    let tx = conn;
+    tx.execute(
+        "UPDATE todo SET position = ?1 WHERE id = ?2",
+        params![todos[idx + 1].position, todos[idx].id],
+    )?;
+    tx.execute(
+        "UPDATE todo SET position = ?1 WHERE id = ?2",
+        params![todos[idx].position, todos[idx + 1].id],
+    )?;
+    Ok(())
+}
+
 // --- Sessions ---
 
 pub fn list_sessions(conn: &Connection, task_id: i64) -> Result<Vec<Session>> {
@@ -239,6 +275,11 @@ pub fn get_active_session(conn: &Connection) -> Result<Option<Session>> {
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     }
+}
+
+pub fn delete_session(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute("DELETE FROM session WHERE id = ?1", params![id])?;
+    Ok(())
 }
 
 pub fn close_orphaned_sessions(conn: &Connection) -> Result<u32> {

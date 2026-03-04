@@ -94,6 +94,11 @@ pub struct App {
     // Pending report key (for r d / r w sequence)
     pub pending_r: bool,
 
+    // Search overlay
+    pub show_search: bool,
+    pub search_results: Vec<Task>,
+    pub search_selected: usize,
+
     // DB and config
     pub db: Connection,
     pub config: Config,
@@ -131,6 +136,10 @@ impl App {
 
             status_message: None,
             pending_r: false,
+
+            show_search: false,
+            search_results: Vec::new(),
+            search_selected: 0,
 
             db,
             config,
@@ -213,10 +222,77 @@ impl App {
             return Ok(());
         }
 
+        if self.show_search {
+            return self.handle_search_key(key);
+        }
+
         match self.input_mode {
             InputMode::Editing => self.handle_editing_key(key),
             InputMode::Normal => self.handle_normal_key(key),
         }
+    }
+
+    fn handle_search_key(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc => {
+                self.show_search = false;
+                self.input_buffer.clear();
+                self.input_cursor = 0;
+                self.search_results.clear();
+                self.search_selected = 0;
+            }
+            KeyCode::Enter => {
+                if let Some(task) = self.search_results.get(self.search_selected) {
+                    let task_id = task.id;
+                    self.show_search = false;
+                    self.input_buffer.clear();
+                    self.input_cursor = 0;
+                    self.search_results.clear();
+                    self.search_selected = 0;
+                    self.view = View::TaskDetail(task_id);
+                    self.detail_section = DetailSection::Description;
+                    self.selected_todo_index = 0;
+                    self.selected_session_index = 0;
+                    self.reload_detail(task_id)?;
+                }
+            }
+            KeyCode::Down => {
+                if !self.search_results.is_empty()
+                    && self.search_selected < self.search_results.len() - 1
+                {
+                    self.search_selected += 1;
+                }
+            }
+            KeyCode::Up => {
+                if self.search_selected > 0 {
+                    self.search_selected -= 1;
+                }
+            }
+            KeyCode::Char(c) => {
+                self.input_buffer.insert(self.input_cursor, c);
+                self.input_cursor += 1;
+                self.update_search_results();
+            }
+            KeyCode::Backspace => {
+                if self.input_cursor > 0 {
+                    self.input_cursor -= 1;
+                    self.input_buffer.remove(self.input_cursor);
+                    self.update_search_results();
+                }
+            }
+            KeyCode::Left => {
+                if self.input_cursor > 0 {
+                    self.input_cursor -= 1;
+                }
+            }
+            KeyCode::Right => {
+                if self.input_cursor < self.input_buffer.len() {
+                    self.input_cursor += 1;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     fn handle_editing_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -440,6 +516,13 @@ impl App {
             KeyCode::Char('r') => {
                 self.pending_r = true;
             }
+            KeyCode::Char('/') => {
+                self.show_search = true;
+                self.input_buffer.clear();
+                self.input_cursor = 0;
+                self.reload_tasks()?;
+                self.update_search_results();
+            }
             _ => {}
         }
         Ok(())
@@ -507,14 +590,65 @@ impl App {
                 }
             }
             KeyCode::Char('D') => {
+                match self.detail_section {
+                    DetailSection::Todos => {
+                        if let Some(todo) = self.todos.get(self.selected_todo_index) {
+                            let todo_id = todo.id;
+                            queries::delete_todo(&self.db, todo_id)?;
+                            self.reload_detail(task_id)?;
+                            self.set_status("Todo deleted");
+                        }
+                    }
+                    DetailSection::Sessions => {
+                        if let Some(session) = self.sessions.get(self.selected_session_index) {
+                            let session_id = session.id;
+                            if self.active_session.as_ref().map(|s| s.id) == Some(session_id) {
+                                self.set_status("Cannot delete active session");
+                            } else {
+                                queries::delete_session(&self.db, session_id)?;
+                                self.reload_detail(task_id)?;
+                                if self.selected_session_index >= self.sessions.len()
+                                    && !self.sessions.is_empty()
+                                {
+                                    self.selected_session_index = self.sessions.len() - 1;
+                                }
+                                self.set_status("Session deleted");
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Char('J') => {
                 if self.detail_section == DetailSection::Todos {
                     if let Some(todo) = self.todos.get(self.selected_todo_index) {
                         let todo_id = todo.id;
-                        queries::delete_todo(&self.db, todo_id)?;
+                        queries::move_todo_down(&self.db, todo_id, task_id)?;
                         self.reload_detail(task_id)?;
-                        self.set_status("Todo deleted");
+                        if self.selected_todo_index + 1 < self.todos.len() {
+                            self.selected_todo_index += 1;
+                        }
                     }
                 }
+            }
+            KeyCode::Char('K') => {
+                if self.detail_section == DetailSection::Todos {
+                    if let Some(todo) = self.todos.get(self.selected_todo_index) {
+                        let todo_id = todo.id;
+                        queries::move_todo_up(&self.db, todo_id, task_id)?;
+                        self.reload_detail(task_id)?;
+                        if self.selected_todo_index > 0 {
+                            self.selected_todo_index -= 1;
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('/') => {
+                self.show_search = true;
+                self.input_buffer.clear();
+                self.input_cursor = 0;
+                self.reload_tasks()?;
+                self.update_search_results();
             }
             KeyCode::Char('s') => {
                 if self.active_session.is_some() {
@@ -629,6 +763,34 @@ impl App {
         } else {
             None
         }
+    }
+
+    pub fn fuzzy_match(query: &str, target: &str) -> bool {
+        if query.is_empty() {
+            return true;
+        }
+        let target_lower = target.to_lowercase();
+        let query_lower = query.to_lowercase();
+        let mut target_chars = target_lower.chars();
+        for qc in query_lower.chars() {
+            if !target_chars.any(|tc| tc == qc) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn update_search_results(&mut self) {
+        let query = self.input_buffer.clone();
+        self.search_results = self
+            .tasks_inbox
+            .iter()
+            .chain(self.tasks_in_progress.iter())
+            .chain(self.tasks_backlog.iter())
+            .filter(|t| Self::fuzzy_match(&query, &t.description))
+            .cloned()
+            .collect();
+        self.search_selected = 0;
     }
 
     fn generate_daily_summary(&mut self) -> Result<()> {
