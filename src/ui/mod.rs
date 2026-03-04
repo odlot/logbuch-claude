@@ -112,7 +112,12 @@ fn draw_search_overlay(frame: &mut Frame, app: &App) {
     }
 
     // Input line
-    let input_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 };
+    let input_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: 1,
+    };
     input::draw_input_line(frame, input_area, "/ ", &app.input_buffer, app.input_cursor);
 
     if inner.height <= 1 {

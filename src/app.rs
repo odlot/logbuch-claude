@@ -589,36 +589,34 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char('D') => {
-                match self.detail_section {
-                    DetailSection::Todos => {
-                        if let Some(todo) = self.todos.get(self.selected_todo_index) {
-                            let todo_id = todo.id;
-                            queries::delete_todo(&self.db, todo_id)?;
-                            self.reload_detail(task_id)?;
-                            self.set_status("Todo deleted");
-                        }
+            KeyCode::Char('D') => match self.detail_section {
+                DetailSection::Todos => {
+                    if let Some(todo) = self.todos.get(self.selected_todo_index) {
+                        let todo_id = todo.id;
+                        queries::delete_todo(&self.db, todo_id)?;
+                        self.reload_detail(task_id)?;
+                        self.set_status("Todo deleted");
                     }
-                    DetailSection::Sessions => {
-                        if let Some(session) = self.sessions.get(self.selected_session_index) {
-                            let session_id = session.id;
-                            if self.active_session.as_ref().map(|s| s.id) == Some(session_id) {
-                                self.set_status("Cannot delete active session");
-                            } else {
-                                queries::delete_session(&self.db, session_id)?;
-                                self.reload_detail(task_id)?;
-                                if self.selected_session_index >= self.sessions.len()
-                                    && !self.sessions.is_empty()
-                                {
-                                    self.selected_session_index = self.sessions.len() - 1;
-                                }
-                                self.set_status("Session deleted");
-                            }
-                        }
-                    }
-                    _ => {}
                 }
-            }
+                DetailSection::Sessions => {
+                    if let Some(session) = self.sessions.get(self.selected_session_index) {
+                        let session_id = session.id;
+                        if self.active_session.as_ref().map(|s| s.id) == Some(session_id) {
+                            self.set_status("Cannot delete active session");
+                        } else {
+                            queries::delete_session(&self.db, session_id)?;
+                            self.reload_detail(task_id)?;
+                            if self.selected_session_index >= self.sessions.len()
+                                && !self.sessions.is_empty()
+                            {
+                                self.selected_session_index = self.sessions.len() - 1;
+                            }
+                            self.set_status("Session deleted");
+                        }
+                    }
+                }
+                _ => {}
+            },
             KeyCode::Char('J') => {
                 if self.detail_section == DetailSection::Todos {
                     if let Some(todo) = self.todos.get(self.selected_todo_index) {
