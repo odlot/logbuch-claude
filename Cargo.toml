@@ -1,6 +1,6 @@
 [package]
 name = "logbuch"
-version = "0.1.1"
+version = "0.1.3"
 edition = "2021"
 description = "A keyboard-driven TUI task-management and productivity app with pomodoro sessions"
 license = "GPL-3.0-only"
