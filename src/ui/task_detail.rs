@@ -151,11 +151,7 @@ pub fn draw(frame: &mut Frame, app: &App, task_id: i64) {
             total_minutes % 60
         )
     } else {
-        format!(
-            " Sessions ({}, {}m) ",
-            app.sessions.len(),
-            total_minutes
-        )
+        format!(" Sessions ({}, {}m) ", app.sessions.len(), total_minutes)
     };
     let session_block = Block::default()
         .title(session_title)
