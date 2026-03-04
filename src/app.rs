@@ -27,6 +27,7 @@ pub enum InputTarget {
     EditDescription,
     NewTodo,
     SessionNote,
+    SessionDuration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -252,6 +253,35 @@ impl App {
                                 self.todos.len() - 1
                             };
                             self.set_status("Todo added");
+                        }
+                    }
+                    InputTarget::SessionDuration => {
+                        if let View::TaskDetail(task_id) = self.view {
+                            match text.parse::<u32>() {
+                                Ok(minutes) if minutes > 0 => {
+                                    let duration = minutes as i32;
+                                    let session_id =
+                                        queries::start_session(&self.db, task_id, duration)?;
+                                    let session = queries::get_active_session(&self.db)?;
+                                    if let Some(s) = session {
+                                        let task = queries::get_task(&self.db, task_id)?;
+                                        self.session_task_description = task.description.clone();
+                                        self.active_session = Some(s);
+                                        self.session_start = Some(Instant::now());
+                                        self.notification_sent = false;
+                                        self.view = View::ActiveSession(session_id);
+                                        self.cancel_input();
+                                        self.start_input(InputTarget::SessionNote, "");
+                                        self.set_status("Session started");
+                                        return Ok(());
+                                    }
+                                }
+                                _ => {
+                                    self.set_status("Invalid duration: enter a number > 0");
+                                    self.cancel_input();
+                                    return Ok(());
+                                }
+                            }
                         }
                     }
                     InputTarget::SessionNote => {
@@ -490,19 +520,12 @@ impl App {
                 if self.active_session.is_some() {
                     self.set_status("A session is already active");
                 } else {
-                    let duration = self.config.session_duration_min as i32;
-                    let session_id = queries::start_session(&self.db, task_id, duration)?;
-                    let session = queries::get_active_session(&self.db)?;
-                    if let Some(s) = session {
-                        let task = queries::get_task(&self.db, task_id)?;
-                        self.session_task_description = task.description.clone();
-                        self.active_session = Some(s);
-                        self.session_start = Some(Instant::now());
-                        self.notification_sent = false;
-                        self.view = View::ActiveSession(session_id);
-                        self.start_input(InputTarget::SessionNote, "");
-                        self.set_status("Session started");
-                    }
+                    let preset = self
+                        .sessions
+                        .first()
+                        .map(|s| s.duration_min as u32)
+                        .unwrap_or(self.config.session_duration_min);
+                    self.start_input(InputTarget::SessionDuration, &preset.to_string());
                 }
             }
             _ => {}
