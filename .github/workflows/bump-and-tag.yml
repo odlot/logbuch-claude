@@ -43,3 +43,7 @@ jobs:
           git commit -m "chore: bump version to $new_version"
           git tag "v$new_version"
           git push https://x-access-token:${{ secrets.RELEASE_TOKEN }}@github.com/${{ github.repository }} main --tags
+          git fetch origin develop
+          git checkout develop
+          git merge main --no-edit
+          git push https://x-access-token:${{ secrets.RELEASE_TOKEN }}@github.com/${{ github.repository }} develop
