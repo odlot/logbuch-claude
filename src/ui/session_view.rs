@@ -3,7 +3,7 @@ use ratatui::widgets::{Block, Borders, Gauge, Paragraph, Wrap};
 
 use crate::app::{App, InputMode};
 
-pub fn draw(frame: &mut Frame, app: &App, _session_id: i64) {
+pub fn draw(frame: &mut Frame, app: &mut App, _session_id: i64) {
     let chunks = Layout::vertical([
         Constraint::Length(3), // title
         Constraint::Length(5), // timer
