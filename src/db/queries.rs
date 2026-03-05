@@ -140,6 +140,14 @@ pub fn insert_todo(conn: &Connection, task_id: i64, description: &str) -> Result
     Ok(conn.last_insert_rowid())
 }
 
+pub fn update_todo_description(conn: &Connection, id: i64, description: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE todo SET description = ?1 WHERE id = ?2",
+        params![description, id],
+    )?;
+    Ok(())
+}
+
 pub fn toggle_todo(conn: &Connection, id: i64) -> Result<()> {
     conn.execute(
         "UPDATE todo SET done = CASE WHEN done = 0 THEN 1 ELSE 0 END,

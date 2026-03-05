@@ -4,7 +4,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use crate::app::{App, InputMode, InputTarget};
 use crate::model::TaskList;
 
-pub fn draw(frame: &mut Frame, app: &App) {
+pub fn draw(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::vertical([
         Constraint::Min(1),    // board
         Constraint::Length(1), // input or status bar
