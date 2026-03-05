@@ -29,9 +29,25 @@ use event::{Event, EventHandler};
     about = "TUI task management with pomodoro sessions"
 )]
 struct Cli {
-    /// Path to config file
+    /// Path to config file (default: ~/.config/logbuch/config.toml)
     #[arg(short, long)]
     config: Option<PathBuf>,
+
+    /// Override the SQLite database path (also: LOGBUCH_DB_PATH)
+    #[arg(long, value_name = "PATH")]
+    db_path: Option<PathBuf>,
+
+    /// Override the summary report output directory (also: LOGBUCH_SUMMARY_DIR)
+    #[arg(long, value_name = "DIR")]
+    summary_dir: Option<PathBuf>,
+
+    /// Override the default session duration in minutes (also: LOGBUCH_SESSION_DURATION)
+    #[arg(long, value_name = "MINUTES")]
+    session_duration: Option<u32>,
+
+    /// Print effective configuration and exit
+    #[arg(long)]
+    show_config: bool,
 
     /// Generate a summary report instead of launching TUI
     #[arg(long, value_enum)]
@@ -46,7 +62,27 @@ enum SummaryKind {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let config = Config::load(cli.config.as_ref())?;
+    let config_path = config::default_config_path();
+    let effective_config_path = cli.config.as_ref().unwrap_or(&config_path);
+
+    let mut config = Config::load(cli.config.as_ref())?;
+
+    // Apply CLI flag overrides (highest priority, after env vars)
+    if let Some(p) = cli.db_path {
+        config.db_path = p;
+    }
+    if let Some(p) = cli.summary_dir {
+        config.summary_export_dir = p;
+    }
+    if let Some(d) = cli.session_duration {
+        config.session_duration_min = d;
+    }
+
+    // --show-config: print effective config and exit
+    if cli.show_config {
+        config.print_summary(effective_config_path);
+        return Ok(());
+    }
 
     // Handle headless summary generation
     if let Some(kind) = cli.summary {

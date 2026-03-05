@@ -16,10 +16,14 @@ cargo build --release
 ## Usage
 
 ```bash
-logbuch                            # open the TUI
-logbuch --summary daily            # print daily report to file (no TUI)
-logbuch --summary weekly           # print weekly report to file (no TUI)
-logbuch --config /path/to/cfg.toml # use a custom config file
+logbuch                              # open the TUI
+logbuch --summary daily              # generate daily report and exit
+logbuch --summary weekly             # generate weekly report and exit
+logbuch --show-config                # print effective configuration and exit
+logbuch --config /path/to/cfg.toml   # use a custom config file
+logbuch --db-path /tmp/test.db       # override database location
+logbuch --summary-dir ~/reports      # override report output directory
+logbuch --session-duration 50        # override default session length (minutes)
 ```
 
 ## TUI Overview
@@ -48,7 +52,7 @@ The starting view shows all tasks across three columns.
 | `k` / `↑` | Select previous task |
 | `Enter` | Open task detail |
 | `n` | New task (type description, Enter to confirm) |
-| `d` | Delete selected task |
+| `d` | Delete selected task (press `d` again to confirm) |
 | `H` | Move task left (Shift+h) |
 | `L` | Move task right (Shift+l) |
 | `r d` | Generate daily summary report |
@@ -101,7 +105,8 @@ Opens when you press `Enter` on a task. Three sections — Description, Todos, S
 |-----|--------|
 | `a` | Add todo |
 | `x` | Toggle todo done/undone |
-| `D` | Delete selected todo |
+| `e` | Edit selected todo description |
+| `D` | Delete selected todo (press `D` again to confirm) |
 | `J` | Move todo down (Shift+j) |
 | `K` | Move todo up (Shift+k) |
 
@@ -110,7 +115,7 @@ Opens when you press `Enter` on a task. Three sections — Description, Todos, S
 | Key | Action |
 |-----|--------|
 | `s` | Start a new session (prompts for duration in minutes) |
-| `D` | Delete selected session |
+| `D` | Delete selected session (press `D` again to confirm) |
 
 The **Session Notes** panel below the list always shows the full notes for the selected session.
 
@@ -161,18 +166,49 @@ Press `/` from any view to open the search overlay.
 
 ## Configuration
 
-Config file: `~/.config/logbuch/config.toml` (created automatically with defaults on first run if missing).
+Settings are resolved in priority order (highest wins):
+
+1. **CLI flags** — `--db-path`, `--summary-dir`, `--session-duration`
+2. **Environment variables** — `LOGBUCH_DB_PATH`, `LOGBUCH_SUMMARY_DIR`, `LOGBUCH_SESSION_DURATION`
+3. **Config file** — `~/.config/logbuch/config.toml`
+4. **Built-in defaults**
+
+### Config file
+
+Created automatically with commented-out defaults on first run. Edit any value:
 
 ```toml
+# ~/.config/logbuch/config.toml
+
 # Duration of a new session in minutes (default: 25)
-session_duration_min = 25
+# session_duration_min = 25
 
 # Where summary reports are written (default: ~/logbuch-reports)
-summary_export_dir = "/home/you/logbuch-reports"
+# summary_export_dir = "~/logbuch-reports"
 
 # SQLite database location (default: ~/.local/share/logbuch/logbuch.db)
-db_path = "/home/you/.local/share/logbuch/logbuch.db"
+# db_path = "~/.local/share/logbuch/logbuch.db"
 ```
+
+Paths support `~` expansion. Use a custom config file with `--config /path/to/cfg.toml`.
+
+### Environment variables
+
+```bash
+export LOGBUCH_DB_PATH=~/.local/share/logbuch/logbuch.db
+export LOGBUCH_SUMMARY_DIR=~/logbuch-reports
+export LOGBUCH_SESSION_DURATION=25   # minutes
+```
+
+Useful for switching between databases without editing the config file (e.g. work vs personal).
+
+### Inspect effective configuration
+
+```bash
+logbuch --show-config
+```
+
+Prints the config file path and every resolved value so you can see exactly which source won.
 
 ## Data
 
