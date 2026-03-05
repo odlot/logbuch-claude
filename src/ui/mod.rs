@@ -8,11 +8,11 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 
 use crate::app::App;
 
-pub fn draw(frame: &mut Frame, app: &App) {
-    match &app.view {
+pub fn draw(frame: &mut Frame, app: &mut App) {
+    match app.view.clone() {
         crate::app::View::Board => board::draw(frame, app),
-        crate::app::View::TaskDetail(task_id) => task_detail::draw(frame, app, *task_id),
-        crate::app::View::ActiveSession(session_id) => session_view::draw(frame, app, *session_id),
+        crate::app::View::TaskDetail(task_id) => task_detail::draw(frame, app, task_id),
+        crate::app::View::ActiveSession(session_id) => session_view::draw(frame, app, session_id),
     }
 
     if app.show_help {
@@ -27,7 +27,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 fn draw_help_overlay(frame: &mut Frame, app: &App) {
     let area = frame.area();
     let popup_width = 60.min(area.width.saturating_sub(4));
-    let popup_height = 20.min(area.height.saturating_sub(4));
+    let popup_height = 22.min(area.height.saturating_sub(4));
     let popup_area = Rect {
         x: (area.width.saturating_sub(popup_width)) / 2,
         y: (area.height.saturating_sub(popup_height)) / 2,
@@ -44,7 +44,7 @@ fn draw_help_overlay(frame: &mut Frame, app: &App) {
              k/Up      Select previous task\n\
              Enter     Open task detail\n\
              n         New task\n\
-             d         Delete task\n\
+             d         Delete task (confirm: d)\n\
              H (Shift) Move task left\n\
              L (Shift) Move task right\n\
              r d       Daily summary\n\
@@ -59,10 +59,10 @@ fn draw_help_overlay(frame: &mut Frame, app: &App) {
              Tab         Next section\n\
              Shift+Tab   Previous section\n\
              j/k         Navigate in section\n\
-             e           Edit description\n\
+             e           Edit description / todo\n\
              a           Add todo\n\
              x           Toggle todo\n\
-             D           Delete todo/session\n\
+             D           Delete todo/session (confirm: D)\n\
              J/K         Move todo up/down\n\
              s           Start session\n\
              /           Search tasks\n\
@@ -160,18 +160,15 @@ fn draw_search_overlay(frame: &mut Frame, app: &App) {
 pub fn status_bar_text(app: &App) -> String {
     let mut parts = Vec::new();
 
-    // View name + keybinding hints
     match &app.view {
         crate::app::View::Board => {
             parts.push("n:new  d:delete  H/L:move  Enter:open  ?:help".to_string())
         }
-        crate::app::View::TaskDetail(_) => {
-            parts.push("e:edit  a:todo  x:toggle  s:session  Esc:back  ?:help".to_string())
-        }
+        crate::app::View::TaskDetail(_) => parts
+            .push("e:edit  a:todo  x:toggle  D:delete  s:session  Esc:back  ?:help".to_string()),
         crate::app::View::ActiveSession(_) => parts.push("Enter:note  Esc:end  ?:help".to_string()),
     };
 
-    // Status message
     if let Some((msg, _)) = &app.status_message {
         parts.push(msg.clone());
     }

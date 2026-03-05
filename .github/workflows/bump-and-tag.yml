@@ -1,4 +1,4 @@
-name: Bump Version and Tag
+name: Tag Release
 
 on:
   pull_request:
@@ -9,7 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  bump-and-tag:
+  tag-release:
+    # Only runs when a PR from develop is merged into main
     if: github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'develop'
     runs-on: ubuntu-latest
     steps:
@@ -18,32 +19,11 @@ jobs:
           ref: main
           token: ${{ secrets.RELEASE_TOKEN }}
 
-      - name: Bump patch version and tag
+      - name: Read version from Cargo.toml and tag
         run: |
-          current=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          major=$(echo "$current" | cut -d. -f1)
-          minor=$(echo "$current" | cut -d. -f2)
-          patch=$(echo "$current" | cut -d. -f3)
-          new_version="$major.$minor.$((patch + 1))"
-          echo "Bumping $current → $new_version"
-
-          sed -i "0,/^version = \"$current\"/s//version = \"$new_version\"/" Cargo.toml
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Update Cargo.lock
-        run: cargo generate-lockfile
-
-      - name: Commit and tag
-        run: |
-          new_version=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          version=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "Tagging v$version"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock
-          git commit -m "chore: bump version to $new_version"
-          git tag "v$new_version"
-          git push https://x-access-token:${{ secrets.RELEASE_TOKEN }}@github.com/${{ github.repository }} main --tags
-          git fetch origin develop
-          git checkout develop
-          git merge main --no-edit
-          git push https://x-access-token:${{ secrets.RELEASE_TOKEN }}@github.com/${{ github.repository }} develop
+          git tag "v$version"
+          git push https://x-access-token:${{ secrets.RELEASE_TOKEN }}@github.com/${{ github.repository }} "v$version"
