@@ -14,36 +14,50 @@ jobs:
     strategy:
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
+          # Linux: fully static musl binaries — no glibc dependency
+          - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             archive: tar.gz
+            use_zigbuild: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz
+            use_zigbuild: true
+          # macOS: links only against stable Apple system frameworks
           - target: x86_64-apple-darwin
             os: macos-latest
             archive: tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            archive: tar.gz
-            linker: gcc-aarch64-linux-gnu
+          # Windows: MSVC static CRT
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install cross-compilation linker
-        if: matrix.linker != ''
-        run: sudo apt-get install -y ${{ matrix.linker }}
+      - name: Install Zig (for musl cross-compilation)
+        if: matrix.use_zigbuild
+        uses: mlugg/setup-zig@v1
 
-      - name: Build
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+      - name: Install cargo-zigbuild
+        if: matrix.use_zigbuild
+        uses: taiki-e/install-action@cargo-zigbuild
+
+      - name: Build (zigbuild — static musl)
+        if: matrix.use_zigbuild
+        run: cargo zigbuild --release --target ${{ matrix.target }}
+
+      - name: Build (native cargo)
+        if: '!matrix.use_zigbuild'
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package (Unix)
@@ -56,7 +70,8 @@ jobs:
         if: matrix.archive == 'zip'
         shell: pwsh
         run: |
-          Compress-Archive -Path target/${{ matrix.target }}/release/logbuch.exe -DestinationPath logbuch-${{ github.ref_name }}-${{ matrix.target }}.zip
+          Compress-Archive -Path target/${{ matrix.target }}/release/logbuch.exe `
+            -DestinationPath logbuch-${{ github.ref_name }}-${{ matrix.target }}.zip
 
       - uses: actions/upload-artifact@v4
         with:

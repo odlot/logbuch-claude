@@ -50,3 +50,14 @@ The app follows a modified Elm Architecture (Model-Update-View):
 - `main` — stable releases only, PRs from develop
 - Feature branches: `feature/<name>` from `develop`
 - Releases: tag `v*` on main triggers cross-platform build + GitHub Release
+
+## Release Process
+
+**Important:** Version bumping happens in `develop` *before* the release PR — never as an auto-commit on `main`. This prevents recurring merge conflicts caused by squash-merge ancestry breaks.
+
+1. In `develop`, run `./scripts/bump-version.sh patch` (or `minor`/`major`)
+2. Commit: `git add Cargo.toml Cargo.lock && git commit -m "chore: bump version to X.Y.Z"`
+3. Open PR from `develop` → `main` — use **"Create a merge commit"** (not squash)
+4. After merge, the `tag-release` workflow reads the version from Cargo.toml and creates `vX.Y.Z`, triggering the release build
+
+**Why not squash-merge?** Squash merges sever the git ancestry chain, making every subsequent release PR appear to conflict with the entire history of develop.
