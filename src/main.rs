@@ -5,6 +5,7 @@ mod event;
 mod model;
 mod summary;
 mod ui;
+mod wizard;
 
 use std::io;
 use std::path::PathBuf;
@@ -73,7 +74,12 @@ fn main() -> Result<()> {
     let config_path = config::default_config_path();
     let effective_config_path = cli.config.as_ref().unwrap_or(&config_path);
 
-    let mut config = Config::load(cli.config.as_ref())?;
+    // First run: no config file and no explicit --config override → show wizard.
+    let mut config = if cli.config.is_none() && !effective_config_path.exists() {
+        wizard::run(effective_config_path)?
+    } else {
+        Config::load(cli.config.as_ref())?
+    };
 
     // Apply CLI flag overrides (highest priority, after env vars)
     if let Some(p) = cli.db_path {

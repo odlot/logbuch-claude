@@ -18,10 +18,9 @@ impl Default for Config {
         let data_dir = dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("logbuch");
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         Self {
             session_duration_min: 25,
-            summary_export_dir: home.join("logbuch-reports"),
+            summary_export_dir: data_dir.join("reports"),
             db_path: data_dir.join("logbuch.db"),
         }
     }
@@ -52,20 +51,6 @@ impl Config {
                 .with_context(|| format!("parsing config file {}", config_path.display()))?;
             cfg
         } else {
-            // First run: write a commented-out default config so the user can
-            // discover the available options without reading documentation.
-            if let Some(parent) = config_path.parent() {
-                std::fs::create_dir_all(parent)
-                    .with_context(|| format!("creating config directory {}", parent.display()))?;
-            }
-            if let Err(e) = Self::write_default_config(&config_path) {
-                // Non-fatal: warn but continue with in-memory defaults.
-                eprintln!(
-                    "Warning: could not write default config to {}: {}",
-                    config_path.display(),
-                    e
-                );
-            }
             Config::default()
         };
 
@@ -99,30 +84,32 @@ impl Config {
         }
     }
 
-    /// Write a fully-commented default config file so the user can see every
-    /// available option with its default value.
-    fn write_default_config(path: &Path) -> Result<()> {
-        let defaults = Config::default();
+    /// Write the config to a TOML file (called by the wizard after the user confirms).
+    pub fn write_to(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating config directory {}", parent.display()))?;
+        }
         let content = format!(
             r#"# Logbuch configuration
-# Generated automatically on first run. Uncomment and edit any value.
+# Edit any value and restart the app to apply changes.
 # Full documentation: https://github.com/odlot/logbuch
 
 # Duration of a new Pomodoro session in minutes.
-# session_duration_min = {duration}
+session_duration_min = {duration}
 
 # Directory where daily/weekly summary reports are written (Markdown).
-# summary_export_dir = "{summary}"
+summary_export_dir = "{summary}"
 
 # Path to the SQLite database file.
-# db_path = "{db}"
+db_path = "{db}"
 "#,
-            duration = defaults.session_duration_min,
-            summary = defaults.summary_export_dir.display(),
-            db = defaults.db_path.display(),
+            duration = self.session_duration_min,
+            summary = self.summary_export_dir.display(),
+            db = self.db_path.display(),
         );
         std::fs::write(path, content)
-            .with_context(|| format!("writing default config to {}", path.display()))?;
+            .with_context(|| format!("writing config to {}", path.display()))?;
         Ok(())
     }
 
@@ -149,7 +136,7 @@ pub fn default_config_path() -> PathBuf {
 }
 
 /// Expand a leading `~/` or bare `~` to the user's home directory.
-fn expand_tilde(path: PathBuf) -> PathBuf {
+pub(crate) fn expand_tilde(path: PathBuf) -> PathBuf {
     let s = match path.to_str() {
         Some(s) => s,
         None => return path,
