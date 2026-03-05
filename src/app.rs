@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::widgets::ListState;
 use rusqlite::Connection;
 
 use crate::config::Config;
@@ -26,8 +27,16 @@ pub enum InputTarget {
     NewTask,
     EditDescription,
     NewTodo,
+    EditTodo,
     SessionNote,
     SessionDuration,
+}
+
+#[derive(Debug, Clone)]
+pub enum ConfirmDelete {
+    Task(i64),
+    Todo(i64),
+    Session(i64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,10 +82,13 @@ pub struct App {
 
     // Task detail state
     pub detail_section: DetailSection,
-    pub selected_todo_index: usize,
-    pub selected_session_index: usize,
+    pub todo_list_state: ListState,
+    pub session_list_state: ListState,
     pub todos: Vec<Todo>,
     pub sessions: Vec<Session>,
+
+    // Pending delete confirmation
+    pub confirm_delete: Option<ConfirmDelete>,
 
     // Active session state
     pub active_session: Option<Session>,
@@ -121,10 +133,12 @@ impl App {
             tasks_backlog: Vec::new(),
 
             detail_section: DetailSection::Description,
-            selected_todo_index: 0,
-            selected_session_index: 0,
+            todo_list_state: ListState::default(),
+            session_list_state: ListState::default(),
             todos: Vec::new(),
             sessions: Vec::new(),
+
+            confirm_delete: None,
 
             active_session: None,
             session_start: None,
@@ -159,11 +173,30 @@ impl App {
         Ok(())
     }
 
+    pub fn selected_todo_index(&self) -> usize {
+        self.todo_list_state.selected().unwrap_or(0)
+    }
+
+    pub fn selected_session_index(&self) -> usize {
+        self.session_list_state.selected().unwrap_or(0)
+    }
+
     fn reload_detail(&mut self, task_id: i64) -> Result<()> {
         self.todos = queries::list_todos(&self.db, task_id)?;
         self.sessions = queries::list_sessions(&self.db, task_id)?;
-        if self.selected_todo_index >= self.todos.len() && !self.todos.is_empty() {
-            self.selected_todo_index = self.todos.len() - 1;
+        // Clamp todo selection
+        if self.todos.is_empty() {
+            self.todo_list_state.select(None);
+        } else {
+            let idx = self.selected_todo_index().min(self.todos.len() - 1);
+            self.todo_list_state.select(Some(idx));
+        }
+        // Clamp session selection
+        if self.sessions.is_empty() {
+            self.session_list_state.select(None);
+        } else {
+            let idx = self.selected_session_index().min(self.sessions.len() - 1);
+            self.session_list_state.select(Some(idx));
         }
         Ok(())
     }
@@ -251,8 +284,8 @@ impl App {
                     self.search_selected = 0;
                     self.view = View::TaskDetail(task_id);
                     self.detail_section = DetailSection::Description;
-                    self.selected_todo_index = 0;
-                    self.selected_session_index = 0;
+                    self.todo_list_state = ListState::default();
+                    self.session_list_state = ListState::default();
                     self.reload_detail(task_id)?;
                 }
             }
@@ -323,12 +356,21 @@ impl App {
                         if let View::TaskDetail(task_id) = self.view {
                             queries::insert_todo(&self.db, task_id, &text)?;
                             self.reload_detail(task_id)?;
-                            self.selected_todo_index = if self.todos.is_empty() {
-                                0
-                            } else {
-                                self.todos.len() - 1
-                            };
+                            if !self.todos.is_empty() {
+                                self.todo_list_state.select(Some(self.todos.len() - 1));
+                            }
                             self.set_status("Todo added");
+                        }
+                    }
+                    InputTarget::EditTodo => {
+                        if let View::TaskDetail(task_id) = self.view {
+                            let idx = self.selected_todo_index();
+                            if let Some(todo) = self.todos.get(idx) {
+                                let todo_id = todo.id;
+                                queries::update_todo_description(&self.db, todo_id, &text)?;
+                            }
+                            self.reload_detail(task_id)?;
+                            self.set_status("Todo updated");
                         }
                     }
                     InputTarget::SessionDuration => {
@@ -438,6 +480,11 @@ impl App {
     }
 
     fn handle_board_key(&mut self, key: KeyEvent) -> Result<()> {
+        // Cancel pending confirmation on any key other than 'd'
+        if self.confirm_delete.is_some() && !matches!(key.code, KeyCode::Char('d')) {
+            self.confirm_delete = None;
+        }
+
         match key.code {
             KeyCode::Char('q') => {
                 if self.active_session.is_some() {
@@ -477,22 +524,29 @@ impl App {
                     let task_id = task.id;
                     self.view = View::TaskDetail(task_id);
                     self.detail_section = DetailSection::Description;
-                    self.selected_todo_index = 0;
-                    self.selected_session_index = 0;
+                    self.todo_list_state = ListState::default();
+                    self.session_list_state = ListState::default();
                     self.reload_detail(task_id)?;
                 }
             }
             KeyCode::Char('n') => {
                 self.start_input(InputTarget::NewTask, "");
             }
-            KeyCode::Char('d') => {
-                if let Some(task) = self.selected_task() {
-                    let task_id = task.id;
-                    queries::delete_task(&self.db, task_id)?;
+            KeyCode::Char('d') => match self.confirm_delete.take() {
+                Some(ConfirmDelete::Task(id)) => {
+                    queries::delete_task(&self.db, id)?;
                     self.reload_tasks()?;
                     self.set_status("Task deleted");
                 }
-            }
+                _ => {
+                    if let Some(task) = self.selected_task() {
+                        let id = task.id;
+                        let preview: String = task.description.chars().take(30).collect();
+                        self.confirm_delete = Some(ConfirmDelete::Task(id));
+                        self.set_status(format!("Delete '{}'? Press d again to confirm", preview));
+                    }
+                }
+            },
             KeyCode::Char('H') => {
                 if let Some(task) = self.selected_task() {
                     if let Some(target) = self.active_column.left() {
@@ -529,8 +583,14 @@ impl App {
     }
 
     fn handle_detail_key(&mut self, key: KeyEvent, task_id: i64) -> Result<()> {
+        // Cancel pending confirmation on any key other than 'D'
+        if self.confirm_delete.is_some() && !matches!(key.code, KeyCode::Char('D')) {
+            self.confirm_delete = None;
+        }
+
         match key.code {
             KeyCode::Esc => {
+                self.confirm_delete = None;
                 self.view = View::Board;
                 self.reload_tasks()?;
             }
@@ -545,43 +605,53 @@ impl App {
             }
             KeyCode::Char('j') | KeyCode::Down => match self.detail_section {
                 DetailSection::Todos => {
-                    if !self.todos.is_empty() && self.selected_todo_index < self.todos.len() - 1 {
-                        self.selected_todo_index += 1;
+                    let idx = self.selected_todo_index();
+                    if !self.todos.is_empty() && idx < self.todos.len() - 1 {
+                        self.todo_list_state.select(Some(idx + 1));
                     }
                 }
                 DetailSection::Sessions => {
-                    if !self.sessions.is_empty()
-                        && self.selected_session_index < self.sessions.len() - 1
-                    {
-                        self.selected_session_index += 1;
+                    let idx = self.selected_session_index();
+                    if !self.sessions.is_empty() && idx < self.sessions.len() - 1 {
+                        self.session_list_state.select(Some(idx + 1));
                     }
                 }
                 _ => {}
             },
             KeyCode::Char('k') | KeyCode::Up => match self.detail_section {
                 DetailSection::Todos => {
-                    if self.selected_todo_index > 0 {
-                        self.selected_todo_index -= 1;
+                    let idx = self.selected_todo_index();
+                    if idx > 0 {
+                        self.todo_list_state.select(Some(idx - 1));
                     }
                 }
                 DetailSection::Sessions => {
-                    if self.selected_session_index > 0 {
-                        self.selected_session_index -= 1;
+                    let idx = self.selected_session_index();
+                    if idx > 0 {
+                        self.session_list_state.select(Some(idx - 1));
                     }
                 }
                 _ => {}
             },
-            KeyCode::Char('e') => {
-                let task = queries::get_task(&self.db, task_id)?;
-                self.start_input(InputTarget::EditDescription, &task.description);
-            }
+            KeyCode::Char('e') => match self.detail_section {
+                DetailSection::Todos => {
+                    let idx = self.selected_todo_index();
+                    if let Some(desc) = self.todos.get(idx).map(|t| t.description.clone()) {
+                        self.start_input(InputTarget::EditTodo, &desc);
+                    }
+                }
+                _ => {
+                    let task = queries::get_task(&self.db, task_id)?;
+                    self.start_input(InputTarget::EditDescription, &task.description);
+                }
+            },
             KeyCode::Char('a') => {
                 self.detail_section = DetailSection::Todos;
                 self.start_input(InputTarget::NewTodo, "");
             }
             KeyCode::Char('x') => {
                 if self.detail_section == DetailSection::Todos {
-                    if let Some(todo) = self.todos.get(self.selected_todo_index) {
+                    if let Some(todo) = self.todos.get(self.selected_todo_index()) {
                         let todo_id = todo.id;
                         queries::toggle_todo(&self.db, todo_id)?;
                         self.reload_detail(task_id)?;
@@ -589,54 +659,69 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char('D') => match self.detail_section {
-                DetailSection::Todos => {
-                    if let Some(todo) = self.todos.get(self.selected_todo_index) {
-                        let todo_id = todo.id;
-                        queries::delete_todo(&self.db, todo_id)?;
-                        self.reload_detail(task_id)?;
-                        self.set_status("Todo deleted");
-                    }
+            KeyCode::Char('D') => match self.confirm_delete.take() {
+                Some(ConfirmDelete::Todo(id)) => {
+                    queries::delete_todo(&self.db, id)?;
+                    self.reload_detail(task_id)?;
+                    self.set_status("Todo deleted");
                 }
-                DetailSection::Sessions => {
-                    if let Some(session) = self.sessions.get(self.selected_session_index) {
-                        let session_id = session.id;
-                        if self.active_session.as_ref().map(|s| s.id) == Some(session_id) {
-                            self.set_status("Cannot delete active session");
-                        } else {
-                            queries::delete_session(&self.db, session_id)?;
-                            self.reload_detail(task_id)?;
-                            if self.selected_session_index >= self.sessions.len()
-                                && !self.sessions.is_empty()
-                            {
-                                self.selected_session_index = self.sessions.len() - 1;
-                            }
-                            self.set_status("Session deleted");
+                Some(ConfirmDelete::Session(id)) => {
+                    queries::delete_session(&self.db, id)?;
+                    self.reload_detail(task_id)?;
+                    self.set_status("Session deleted");
+                }
+                _ => match self.detail_section {
+                    DetailSection::Todos => {
+                        let idx = self.selected_todo_index();
+                        if let Some(todo) = self.todos.get(idx) {
+                            let preview: String = todo.description.chars().take(25).collect();
+                            self.confirm_delete = Some(ConfirmDelete::Todo(todo.id));
+                            self.set_status(format!(
+                                "Delete todo '{}'? Press D again to confirm",
+                                preview
+                            ));
                         }
                     }
-                }
-                _ => {}
+                    DetailSection::Sessions => {
+                        let idx = self.selected_session_index();
+                        if let Some(session) = self.sessions.get(idx) {
+                            if self.active_session.as_ref().map(|s| s.id) == Some(session.id) {
+                                self.set_status("Cannot delete active session");
+                            } else {
+                                let preview = session.begin_at.format("%Y-%m-%d %H:%M").to_string();
+                                self.confirm_delete = Some(ConfirmDelete::Session(session.id));
+                                self.set_status(format!(
+                                    "Delete session {}? Press D again to confirm",
+                                    preview
+                                ));
+                            }
+                        }
+                    }
+                    _ => {}
+                },
             },
             KeyCode::Char('J') => {
                 if self.detail_section == DetailSection::Todos {
-                    if let Some(todo) = self.todos.get(self.selected_todo_index) {
+                    let idx = self.selected_todo_index();
+                    if let Some(todo) = self.todos.get(idx) {
                         let todo_id = todo.id;
                         queries::move_todo_down(&self.db, todo_id, task_id)?;
                         self.reload_detail(task_id)?;
-                        if self.selected_todo_index + 1 < self.todos.len() {
-                            self.selected_todo_index += 1;
+                        if idx + 1 < self.todos.len() {
+                            self.todo_list_state.select(Some(idx + 1));
                         }
                     }
                 }
             }
             KeyCode::Char('K') => {
                 if self.detail_section == DetailSection::Todos {
-                    if let Some(todo) = self.todos.get(self.selected_todo_index) {
+                    let idx = self.selected_todo_index();
+                    if let Some(todo) = self.todos.get(idx) {
                         let todo_id = todo.id;
                         queries::move_todo_up(&self.db, todo_id, task_id)?;
                         self.reload_detail(task_id)?;
-                        if self.selected_todo_index > 0 {
-                            self.selected_todo_index -= 1;
+                        if idx > 0 {
+                            self.todo_list_state.select(Some(idx - 1));
                         }
                     }
                 }
