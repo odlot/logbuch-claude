@@ -14,7 +14,8 @@ pub fn draw(frame: &mut Frame, app: &App, task_id: i64) {
         Constraint::Length(3), // title
         Constraint::Length(5), // description
         Constraint::Min(6),    // todos
-        Constraint::Length(8), // sessions
+        Constraint::Length(6), // sessions
+        Constraint::Length(3), // session notes
         Constraint::Length(1), // status bar
     ])
     .split(frame.area());
@@ -212,8 +213,34 @@ pub fn draw(frame: &mut Frame, app: &App, task_id: i64) {
     let session_list = List::new(session_items).block(session_block);
     frame.render_widget(session_list, chunks[3]);
 
+    // Session notes panel
+    let notes_text = app
+        .sessions
+        .get(app.selected_session_index)
+        .map(|s| {
+            if s.notes.is_empty() {
+                "(no notes)".to_string()
+            } else {
+                s.notes.clone()
+            }
+        })
+        .unwrap_or_else(|| "(no sessions)".to_string());
+    let notes_style = if app.detail_section == DetailSection::Sessions {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let notes_block = Block::default()
+        .title(" Session Notes ")
+        .borders(Borders::ALL)
+        .border_style(notes_style);
+    let notes_paragraph = Paragraph::new(notes_text)
+        .block(notes_block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(notes_paragraph, chunks[4]);
+
     // Status bar
-    draw_detail_status(frame, app, chunks[4]);
+    draw_detail_status(frame, app, chunks[5]);
 }
 
 fn draw_detail_status(frame: &mut Frame, app: &App, area: Rect) {

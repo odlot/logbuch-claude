@@ -4,7 +4,7 @@ pub mod session_view;
 pub mod task_detail;
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 
 use crate::app::App;
 
@@ -17,6 +17,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     if app.show_help {
         draw_help_overlay(frame, app);
+    }
+
+    if app.show_search {
+        draw_search_overlay(frame, app);
     }
 }
 
@@ -45,6 +49,7 @@ fn draw_help_overlay(frame: &mut Frame, app: &App) {
              L (Shift) Move task right\n\
              r d       Daily summary\n\
              r w       Weekly summary\n\
+             /         Search tasks\n\
              q         Quit\n\
              ?         Toggle help"
         }
@@ -57,8 +62,10 @@ fn draw_help_overlay(frame: &mut Frame, app: &App) {
              e           Edit description\n\
              a           Add todo\n\
              x           Toggle todo\n\
-             D           Delete todo\n\
+             D           Delete todo/session\n\
+             J/K         Move todo up/down\n\
              s           Start session\n\
+             /           Search tasks\n\
              ?           Toggle help"
         }
         crate::app::View::ActiveSession(_) => {
@@ -79,6 +86,75 @@ fn draw_help_overlay(frame: &mut Frame, app: &App) {
         .block(block)
         .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, popup_area);
+}
+
+fn draw_search_overlay(frame: &mut Frame, app: &App) {
+    let area = frame.area();
+    let popup_width = (area.width * 60 / 100).min(area.width.saturating_sub(4));
+    let popup_height = 20u16.min(area.height.saturating_sub(4));
+    let popup_area = Rect {
+        x: (area.width.saturating_sub(popup_width)) / 2,
+        y: (area.height.saturating_sub(popup_height)) / 2,
+        width: popup_width,
+        height: popup_height,
+    };
+
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .title(" Search tasks ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    if inner.height == 0 {
+        return;
+    }
+
+    // Input line
+    let input_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: 1,
+    };
+    input::draw_input_line(frame, input_area, "/ ", &app.input_buffer, app.input_cursor);
+
+    if inner.height <= 1 {
+        return;
+    }
+
+    // Results list
+    let results_area = Rect {
+        x: inner.x,
+        y: inner.y + 1,
+        width: inner.width,
+        height: inner.height - 1,
+    };
+
+    if app.search_results.is_empty() && !app.input_buffer.is_empty() {
+        let no_results = Paragraph::new("No results").style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(no_results, results_area);
+    } else {
+        let max_items = results_area.height as usize;
+        let items: Vec<ListItem> = app
+            .search_results
+            .iter()
+            .enumerate()
+            .take(max_items)
+            .map(|(i, task)| {
+                let label = format!("[{}] {}", task.list.display_name(), task.description);
+                let style = if i == app.search_selected {
+                    Style::default().fg(Color::Black).bg(Color::Cyan)
+                } else {
+                    Style::default()
+                };
+                ListItem::new(label).style(style)
+            })
+            .collect();
+        let list = List::new(items);
+        frame.render_widget(list, results_area);
+    }
 }
 
 pub fn status_bar_text(app: &App) -> String {
