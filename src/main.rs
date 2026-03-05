@@ -61,6 +61,14 @@ enum SummaryKind {
 }
 
 fn main() -> Result<()> {
+    // Restore the terminal if the app panics so the shell is not left broken.
+    let orig_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        orig_hook(info);
+    }));
+
     let cli = Cli::parse();
     let config_path = config::default_config_path();
     let effective_config_path = cli.config.as_ref().unwrap_or(&config_path);
