@@ -36,7 +36,26 @@ CREATE TABLE IF NOT EXISTS schema_version (
 INSERT INTO schema_version (version) VALUES (1);
 ";
 
-const MIGRATIONS: &[(i32, &str)] = &[(1, MIGRATION_001)];
+// Migration 002: extend the task.list CHECK constraint to allow 'done'.
+// SQLite does not support ALTER COLUMN, so we recreate the table.
+const MIGRATION_002: &str = "
+PRAGMA foreign_keys=OFF;
+CREATE TABLE task_new (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    description TEXT    NOT NULL,
+    list        TEXT    NOT NULL CHECK (list IN ('inbox','in_progress','backlog','done')),
+    position    INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now','localtime')),
+    updated_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now','localtime'))
+);
+INSERT INTO task_new SELECT id, description, list, position, created_at, updated_at FROM task;
+DROP TABLE task;
+ALTER TABLE task_new RENAME TO task;
+INSERT INTO schema_version (version) VALUES (2);
+PRAGMA foreign_keys=ON;
+";
+
+const MIGRATIONS: &[(i32, &str)] = &[(1, MIGRATION_001), (2, MIGRATION_002)];
 
 pub fn run(conn: &Connection) -> Result<()> {
     let current_version = get_current_version(conn);
