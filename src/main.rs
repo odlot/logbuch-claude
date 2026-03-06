@@ -1,12 +1,3 @@
-mod app;
-mod config;
-mod db;
-mod event;
-mod model;
-mod summary;
-mod ui;
-mod wizard;
-
 use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -19,9 +10,10 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 
-use app::App;
-use config::Config;
-use event::{Event, EventHandler};
+use logbuch::app::App;
+use logbuch::config::{self as config, Config};
+use logbuch::event::{Event, EventHandler};
+use logbuch::{db, summary, ui, wizard};
 
 #[derive(Parser)]
 #[command(

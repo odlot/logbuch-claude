@@ -1,127 +1,194 @@
 use rusqlite::Connection;
 
-// We can't use `use logbuch::...` because the crate is a binary.
-// Instead, we test the DB layer directly using rusqlite + the same SQL.
+use logbuch::db::{self, migrations, queries};
+use logbuch::model::TaskList;
 
-const MIGRATION_001: &str = "
-CREATE TABLE IF NOT EXISTS task (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    description TEXT    NOT NULL,
-    list        TEXT    NOT NULL CHECK (list IN ('inbox', 'in_progress', 'backlog')),
-    position    INTEGER NOT NULL DEFAULT 0,
-    created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')),
-    updated_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))
-);
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS session (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_id      INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
-    begin_at     TEXT    NOT NULL,
-    end_at       TEXT,
-    duration_min INTEGER NOT NULL DEFAULT 25,
-    notes        TEXT    NOT NULL DEFAULT ''
-);
-
-CREATE TABLE IF NOT EXISTS todo (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_id      INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
-    description  TEXT    NOT NULL,
-    done         INTEGER NOT NULL DEFAULT 0,
-    position     INTEGER NOT NULL DEFAULT 0,
-    completed_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS schema_version (
-    version INTEGER PRIMARY KEY
-);
-
-INSERT INTO schema_version (version) VALUES (1);
-";
-
-fn setup_db() -> Connection {
+fn setup() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-    conn.execute_batch(MIGRATION_001).unwrap();
+    migrations::run(&conn).unwrap();
     conn
 }
 
-#[test]
-fn test_create_task() {
-    let conn = setup_db();
-    conn.execute(
-        "INSERT INTO task (description, list, position) VALUES ('Test task', 'inbox', 0)",
-        [],
-    )
-    .unwrap();
+// ---------------------------------------------------------------------------
+// Migrations
+// ---------------------------------------------------------------------------
 
+#[test]
+fn migrations_creates_all_required_tables() {
+    // Arrange
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+
+    // Act
+    migrations::run(&conn).unwrap();
+
+    // Assert: all four tables must exist
     let count: i32 = conn
-        .query_row("SELECT COUNT(*) FROM task", [], |row| row.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table'
+             AND name IN ('task','session','todo','schema_version')",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
-    assert_eq!(count, 1);
-
-    let desc: String = conn
-        .query_row("SELECT description FROM task WHERE id = 1", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(desc, "Test task");
+    assert_eq!(count, 4);
 }
 
 #[test]
-fn test_move_task() {
-    let conn = setup_db();
-    conn.execute(
-        "INSERT INTO task (description, list, position) VALUES ('Task 1', 'inbox', 0)",
-        [],
-    )
-    .unwrap();
+fn migrations_run_is_idempotent() {
+    // Arrange
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+    migrations::run(&conn).unwrap();
 
-    conn.execute(
-        "UPDATE task SET list = 'in_progress', position = 0 WHERE id = 1",
-        [],
-    )
-    .unwrap();
+    // Act: running a second time must not error
+    let result = migrations::run(&conn);
 
-    let list: String = conn
-        .query_row("SELECT list FROM task WHERE id = 1", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(list, "in_progress");
+    // Assert
+    assert!(result.is_ok());
 }
 
 #[test]
-fn test_delete_task_cascades() {
-    let conn = setup_db();
-    conn.execute(
-        "INSERT INTO task (description, list, position) VALUES ('Task', 'inbox', 0)",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO todo (task_id, description, position) VALUES (1, 'Todo 1', 0)",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO session (task_id, begin_at, duration_min) VALUES (1, '2026-03-01T10:00:00', 25)",
-        [],
-    )
-    .unwrap();
+fn db_init_creates_database_file_and_schema() {
+    // Arrange
+    let dir = tempfile::TempDir::new().unwrap();
+    let db_path = dir.path().join("test.db");
 
-    // Verify children exist
-    let todo_count: i32 = conn
-        .query_row("SELECT COUNT(*) FROM todo", [], |row| row.get(0))
+    // Act
+    let conn = db::init(&db_path).unwrap();
+
+    // Assert: file exists and schema is in place
+    assert!(db_path.exists());
+    let count: i32 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table'
+             AND name IN ('task','session','todo','schema_version')",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
-    assert_eq!(todo_count, 1);
+    assert_eq!(count, 4);
+}
 
-    let session_count: i32 = conn
-        .query_row("SELECT COUNT(*) FROM session", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(session_count, 1);
+// ---------------------------------------------------------------------------
+// Task CRUD
+// ---------------------------------------------------------------------------
 
-    // Delete parent task
-    conn.execute("DELETE FROM task WHERE id = 1", []).unwrap();
+#[test]
+fn insert_task_returns_id_and_task_appears_in_list() {
+    // Arrange
+    let conn = setup();
 
-    // Children should be cascaded
+    // Act
+    let id = queries::insert_task(&conn, "Buy milk", &TaskList::Inbox).unwrap();
+
+    // Assert
+    let tasks = queries::list_tasks(&conn, &TaskList::Inbox).unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].id, id);
+    assert_eq!(tasks[0].description, "Buy milk");
+    assert_eq!(tasks[0].list, TaskList::Inbox);
+}
+
+#[test]
+fn insert_multiple_tasks_assigns_sequential_positions() {
+    // Arrange
+    let conn = setup();
+
+    // Act
+    queries::insert_task(&conn, "First", &TaskList::Inbox).unwrap();
+    queries::insert_task(&conn, "Second", &TaskList::Inbox).unwrap();
+    queries::insert_task(&conn, "Third", &TaskList::Inbox).unwrap();
+
+    // Assert
+    let tasks = queries::list_tasks(&conn, &TaskList::Inbox).unwrap();
+    assert_eq!(tasks[0].description, "First");
+    assert_eq!(tasks[1].description, "Second");
+    assert_eq!(tasks[2].description, "Third");
+    assert!(tasks[0].position < tasks[1].position);
+    assert!(tasks[1].position < tasks[2].position);
+}
+
+#[test]
+fn list_tasks_returns_empty_for_list_with_no_tasks() {
+    // Arrange
+    let conn = setup();
+    queries::insert_task(&conn, "Inbox task", &TaskList::Inbox).unwrap();
+
+    // Act
+    let tasks = queries::list_tasks(&conn, &TaskList::InProgress).unwrap();
+
+    // Assert
+    assert!(tasks.is_empty());
+}
+
+#[test]
+fn get_task_returns_correct_task() {
+    // Arrange
+    let conn = setup();
+    let id = queries::insert_task(&conn, "My task", &TaskList::Backlog).unwrap();
+
+    // Act
+    let task = queries::get_task(&conn, id).unwrap();
+
+    // Assert
+    assert_eq!(task.id, id);
+    assert_eq!(task.description, "My task");
+    assert_eq!(task.list, TaskList::Backlog);
+}
+
+#[test]
+fn update_task_description_changes_description() {
+    // Arrange
+    let conn = setup();
+    let id = queries::insert_task(&conn, "Old name", &TaskList::Inbox).unwrap();
+
+    // Act
+    queries::update_task_description(&conn, id, "New name").unwrap();
+
+    // Assert
+    let task = queries::get_task(&conn, id).unwrap();
+    assert_eq!(task.description, "New name");
+}
+
+#[test]
+fn move_task_places_task_at_end_of_target_list() {
+    // Arrange
+    let conn = setup();
+    let id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    queries::insert_task(&conn, "Existing", &TaskList::InProgress).unwrap();
+
+    // Act
+    queries::move_task(&conn, id, &TaskList::InProgress).unwrap();
+
+    // Assert
+    let inbox = queries::list_tasks(&conn, &TaskList::Inbox).unwrap();
+    let in_progress = queries::list_tasks(&conn, &TaskList::InProgress).unwrap();
+    assert!(inbox.is_empty());
+    assert_eq!(in_progress.len(), 2);
+    assert_eq!(in_progress.last().unwrap().description, "Task");
+}
+
+#[test]
+fn delete_task_removes_it_and_cascades_to_todos_and_sessions() {
+    // Arrange
+    let conn = setup();
+    let id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    queries::insert_todo(&conn, id, "A todo").unwrap();
+    queries::start_session(&conn, id, 25).unwrap();
+
+    // Act
+    queries::delete_task(&conn, id).unwrap();
+
+    // Assert
+    let tasks = queries::list_tasks(&conn, &TaskList::Inbox).unwrap();
+    assert!(tasks.is_empty());
+
     let todo_count: i32 = conn
         .query_row("SELECT COUNT(*) FROM todo", [], |row| row.get(0))
         .unwrap();
@@ -134,261 +201,521 @@ fn test_delete_task_cascades() {
 }
 
 #[test]
-fn test_todo_toggle() {
-    let conn = setup_db();
-    conn.execute(
-        "INSERT INTO task (description, list, position) VALUES ('Task', 'inbox', 0)",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO todo (task_id, description, position) VALUES (1, 'Do something', 0)",
-        [],
-    )
-    .unwrap();
+fn list_tasks_reports_zero_days_inactive_for_brand_new_task() {
+    // Arrange
+    let conn = setup();
 
-    // Initially not done
-    let done: i32 = conn
-        .query_row("SELECT done FROM todo WHERE id = 1", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(done, 0);
+    // Act
+    queries::insert_task(&conn, "Fresh task", &TaskList::Inbox).unwrap();
+    let tasks = queries::list_tasks(&conn, &TaskList::Inbox).unwrap();
 
-    // Toggle to done
-    conn.execute(
-        "UPDATE todo SET done = CASE WHEN done = 0 THEN 1 ELSE 0 END,
-         completed_at = CASE WHEN done = 0 THEN strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime') ELSE NULL END
-         WHERE id = 1",
-        [],
-    )
-    .unwrap();
-
-    let done: i32 = conn
-        .query_row("SELECT done FROM todo WHERE id = 1", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(done, 1);
-
-    let completed_at: Option<String> = conn
-        .query_row("SELECT completed_at FROM todo WHERE id = 1", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert!(completed_at.is_some());
-
-    // Toggle back to not done
-    conn.execute(
-        "UPDATE todo SET done = CASE WHEN done = 0 THEN 1 ELSE 0 END,
-         completed_at = CASE WHEN done = 0 THEN strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime') ELSE NULL END
-         WHERE id = 1",
-        [],
-    )
-    .unwrap();
-
-    let done: i32 = conn
-        .query_row("SELECT done FROM todo WHERE id = 1", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(done, 0);
-
-    let completed_at: Option<String> = conn
-        .query_row("SELECT completed_at FROM todo WHERE id = 1", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert!(completed_at.is_none());
+    // Assert: created moments ago, inactivity must be 0
+    assert_eq!(tasks[0].days_inactive, 0);
 }
 
 #[test]
-fn test_session_lifecycle() {
-    let conn = setup_db();
+fn list_tasks_reports_nonzero_days_inactive_for_old_task() {
+    // Arrange
+    let conn = setup();
+    let id = queries::insert_task(&conn, "Old task", &TaskList::Inbox).unwrap();
     conn.execute(
-        "INSERT INTO task (description, list, position) VALUES ('Task', 'inbox', 0)",
-        [],
+        "UPDATE task SET created_at = '2000-01-01T00:00:00' WHERE id = ?1",
+        [id],
     )
     .unwrap();
 
-    // Start a session
-    conn.execute(
-        "INSERT INTO session (task_id, begin_at, duration_min) VALUES (1, '2026-03-01T10:00:00', 25)",
-        [],
-    )
-    .unwrap();
+    // Act
+    let tasks = queries::list_tasks(&conn, &TaskList::Inbox).unwrap();
 
-    // Session should be active (no end_at)
-    let end_at: Option<String> = conn
-        .query_row("SELECT end_at FROM session WHERE id = 1", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert!(end_at.is_none());
-
-    // Append notes
-    conn.execute(
-        "UPDATE session SET notes = CASE
-            WHEN notes = '' THEN 'First note'
-            ELSE notes || char(10) || 'First note'
-         END WHERE id = 1",
-        [],
-    )
-    .unwrap();
-
-    conn.execute(
-        "UPDATE session SET notes = CASE
-            WHEN notes = '' THEN 'Second note'
-            ELSE notes || char(10) || 'Second note'
-         END WHERE id = 1",
-        [],
-    )
-    .unwrap();
-
-    let notes: String = conn
-        .query_row("SELECT notes FROM session WHERE id = 1", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(notes, "First note\nSecond note");
-
-    // End session
-    conn.execute(
-        "UPDATE session SET end_at = '2026-03-01T10:25:00' WHERE id = 1",
-        [],
-    )
-    .unwrap();
-
-    let end_at: Option<String> = conn
-        .query_row("SELECT end_at FROM session WHERE id = 1", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(end_at, Some("2026-03-01T10:25:00".to_string()));
+    // Assert: created over 20 years ago
+    assert!(tasks[0].days_inactive > 1000);
 }
 
 #[test]
-fn test_close_orphaned_sessions() {
-    let conn = setup_db();
+fn purge_stale_tasks_deletes_tasks_older_than_threshold() {
+    // Arrange
+    let conn = setup();
+    let stale_id = queries::insert_task(&conn, "Stale task", &TaskList::Inbox).unwrap();
     conn.execute(
-        "INSERT INTO task (description, list, position) VALUES ('Task', 'inbox', 0)",
-        [],
+        "UPDATE task SET created_at = '2000-01-01T00:00:00' WHERE id = ?1",
+        [stale_id],
     )
     .unwrap();
+    queries::insert_task(&conn, "Fresh task", &TaskList::Inbox).unwrap();
 
-    // Create an orphaned session (no end_at)
-    conn.execute(
-        "INSERT INTO session (task_id, begin_at, duration_min) VALUES (1, '2026-03-01T10:00:00', 25)",
-        [],
-    )
-    .unwrap();
+    // Act
+    let deleted = queries::purge_stale_tasks(&conn, 28).unwrap();
 
-    // Close orphaned sessions
-    let count = conn
-        .execute(
-            "UPDATE session SET end_at = strftime('%Y-%m-%dT%H:%M:%S',
-                datetime(begin_at, '+' || duration_min || ' minutes'))
-             WHERE end_at IS NULL",
-            [],
-        )
-        .unwrap();
-    assert_eq!(count, 1);
-
-    let end_at: String = conn
-        .query_row("SELECT end_at FROM session WHERE id = 1", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(end_at, "2026-03-01T10:25:00");
+    // Assert
+    assert_eq!(deleted, vec!["Stale task"]);
+    let remaining = queries::list_tasks(&conn, &TaskList::Inbox).unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].description, "Fresh task");
 }
 
 #[test]
-fn test_list_constraint() {
-    let conn = setup_db();
-    let result = conn.execute(
-        "INSERT INTO task (description, list, position) VALUES ('Bad', 'invalid_list', 0)",
-        [],
-    );
-    assert!(result.is_err(), "Should reject invalid list values");
+fn purge_stale_tasks_does_not_delete_archived_tasks() {
+    // Arrange
+    let conn = setup();
+    let id = queries::insert_task(&conn, "Done task", &TaskList::Inbox).unwrap();
+    conn.execute(
+        "UPDATE task SET created_at = '2000-01-01T00:00:00' WHERE id = ?1",
+        [id],
+    )
+    .unwrap();
+    queries::archive_task(&conn, id).unwrap();
+
+    // Act
+    let deleted = queries::purge_stale_tasks(&conn, 28).unwrap();
+
+    // Assert: archived tasks are excluded from purge
+    assert!(deleted.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Todo CRUD
+// ---------------------------------------------------------------------------
+
+#[test]
+fn insert_todo_appends_to_task_and_appears_in_list() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+
+    // Act
+    let todo_id = queries::insert_todo(&conn, task_id, "Write tests").unwrap();
+
+    // Assert
+    let todos = queries::list_todos(&conn, task_id).unwrap();
+    assert_eq!(todos.len(), 1);
+    assert_eq!(todos[0].id, todo_id);
+    assert_eq!(todos[0].description, "Write tests");
+    assert!(!todos[0].done);
 }
 
 #[test]
-fn test_task_position_ordering() {
-    let conn = setup_db();
-    conn.execute(
-        "INSERT INTO task (description, list, position) VALUES ('Third', 'inbox', 2)",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO task (description, list, position) VALUES ('First', 'inbox', 0)",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO task (description, list, position) VALUES ('Second', 'inbox', 1)",
-        [],
-    )
-    .unwrap();
+fn list_todos_returns_todos_in_position_order() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    queries::insert_todo(&conn, task_id, "Alpha").unwrap();
+    queries::insert_todo(&conn, task_id, "Beta").unwrap();
+    queries::insert_todo(&conn, task_id, "Gamma").unwrap();
 
-    let mut stmt = conn
-        .prepare("SELECT description FROM task WHERE list = 'inbox' ORDER BY position ASC")
-        .unwrap();
-    let descriptions: Vec<String> = stmt
-        .query_map([], |row| row.get(0))
-        .unwrap()
-        .map(|r| r.unwrap())
-        .collect();
+    // Act
+    let todos = queries::list_todos(&conn, task_id).unwrap();
 
-    assert_eq!(descriptions, vec!["First", "Second", "Third"]);
+    // Assert
+    assert_eq!(todos[0].description, "Alpha");
+    assert_eq!(todos[1].description, "Beta");
+    assert_eq!(todos[2].description, "Gamma");
 }
 
 #[test]
-fn test_summary_queries() {
-    let conn = setup_db();
+fn update_todo_description_changes_description() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    let todo_id = queries::insert_todo(&conn, task_id, "Old").unwrap();
 
-    // Create task with a completed session
+    // Act
+    queries::update_todo_description(&conn, todo_id, "New").unwrap();
+
+    // Assert
+    let todos = queries::list_todos(&conn, task_id).unwrap();
+    assert_eq!(todos[0].description, "New");
+}
+
+#[test]
+fn toggle_todo_marks_not_done_as_done_and_sets_completed_at() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    let todo_id = queries::insert_todo(&conn, task_id, "Do something").unwrap();
+
+    // Act
+    queries::toggle_todo(&conn, todo_id).unwrap();
+
+    // Assert
+    let todos = queries::list_todos(&conn, task_id).unwrap();
+    assert!(todos[0].done);
+    assert!(todos[0].completed_at.is_some());
+}
+
+#[test]
+fn toggle_todo_marks_done_as_not_done_and_clears_completed_at() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    let todo_id = queries::insert_todo(&conn, task_id, "Do something").unwrap();
+    queries::toggle_todo(&conn, todo_id).unwrap(); // → done
+
+    // Act
+    queries::toggle_todo(&conn, todo_id).unwrap(); // → not done
+
+    // Assert
+    let todos = queries::list_todos(&conn, task_id).unwrap();
+    assert!(!todos[0].done);
+    assert!(todos[0].completed_at.is_none());
+}
+
+#[test]
+fn delete_todo_removes_todo() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    let todo_id = queries::insert_todo(&conn, task_id, "To delete").unwrap();
+
+    // Act
+    queries::delete_todo(&conn, todo_id).unwrap();
+
+    // Assert
+    let todos = queries::list_todos(&conn, task_id).unwrap();
+    assert!(todos.is_empty());
+}
+
+#[test]
+fn move_todo_up_swaps_todo_with_the_one_above_it() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    queries::insert_todo(&conn, task_id, "First").unwrap();
+    let second_id = queries::insert_todo(&conn, task_id, "Second").unwrap();
+
+    // Act
+    queries::move_todo_up(&conn, second_id, task_id).unwrap();
+
+    // Assert
+    let todos = queries::list_todos(&conn, task_id).unwrap();
+    assert_eq!(todos[0].description, "Second");
+    assert_eq!(todos[1].description, "First");
+}
+
+#[test]
+fn move_todo_up_is_noop_when_todo_is_already_first() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    let first_id = queries::insert_todo(&conn, task_id, "First").unwrap();
+    queries::insert_todo(&conn, task_id, "Second").unwrap();
+
+    // Act
+    queries::move_todo_up(&conn, first_id, task_id).unwrap();
+
+    // Assert: order unchanged
+    let todos = queries::list_todos(&conn, task_id).unwrap();
+    assert_eq!(todos[0].description, "First");
+    assert_eq!(todos[1].description, "Second");
+}
+
+#[test]
+fn move_todo_down_swaps_todo_with_the_one_below_it() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    let first_id = queries::insert_todo(&conn, task_id, "First").unwrap();
+    queries::insert_todo(&conn, task_id, "Second").unwrap();
+
+    // Act
+    queries::move_todo_down(&conn, first_id, task_id).unwrap();
+
+    // Assert
+    let todos = queries::list_todos(&conn, task_id).unwrap();
+    assert_eq!(todos[0].description, "Second");
+    assert_eq!(todos[1].description, "First");
+}
+
+#[test]
+fn move_todo_down_is_noop_when_todo_is_already_last() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    queries::insert_todo(&conn, task_id, "First").unwrap();
+    let last_id = queries::insert_todo(&conn, task_id, "Last").unwrap();
+
+    // Act
+    queries::move_todo_down(&conn, last_id, task_id).unwrap();
+
+    // Assert: order unchanged
+    let todos = queries::list_todos(&conn, task_id).unwrap();
+    assert_eq!(todos[0].description, "First");
+    assert_eq!(todos[1].description, "Last");
+}
+
+// ---------------------------------------------------------------------------
+// Session CRUD
+// ---------------------------------------------------------------------------
+
+#[test]
+fn start_session_creates_an_open_session_for_the_task() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+
+    // Act
+    let session_id = queries::start_session(&conn, task_id, 25).unwrap();
+
+    // Assert
+    let sessions = queries::list_sessions(&conn, task_id).unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].id, session_id);
+    assert_eq!(sessions[0].task_id, task_id);
+    assert_eq!(sessions[0].duration_min, 25);
+    assert!(sessions[0].end_at.is_none());
+}
+
+#[test]
+fn end_session_sets_end_at_on_the_session() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    let session_id = queries::start_session(&conn, task_id, 25).unwrap();
+
+    // Act
+    queries::end_session(&conn, session_id).unwrap();
+
+    // Assert
+    let sessions = queries::list_sessions(&conn, task_id).unwrap();
+    assert!(sessions[0].end_at.is_some());
+}
+
+#[test]
+fn append_session_notes_concatenates_lines_with_newline() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    let session_id = queries::start_session(&conn, task_id, 25).unwrap();
+
+    // Act
+    queries::append_session_notes(&conn, session_id, "Line one").unwrap();
+    queries::append_session_notes(&conn, session_id, "Line two").unwrap();
+
+    // Assert
+    let sessions = queries::list_sessions(&conn, task_id).unwrap();
+    assert_eq!(sessions[0].notes, "Line one\nLine two");
+}
+
+#[test]
+fn get_active_session_returns_the_open_session() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    let session_id = queries::start_session(&conn, task_id, 25).unwrap();
+
+    // Act
+    let active = queries::get_active_session(&conn).unwrap();
+
+    // Assert
+    assert!(active.is_some());
+    assert_eq!(active.unwrap().id, session_id);
+}
+
+#[test]
+fn get_active_session_returns_none_when_no_open_session_exists() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    let session_id = queries::start_session(&conn, task_id, 25).unwrap();
+    queries::end_session(&conn, session_id).unwrap();
+
+    // Act
+    let active = queries::get_active_session(&conn).unwrap();
+
+    // Assert
+    assert!(active.is_none());
+}
+
+#[test]
+fn list_sessions_returns_sessions_newest_first() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
     conn.execute(
-        "INSERT INTO task (description, list, position) VALUES ('Task A', 'inbox', 0)",
-        [],
+        "INSERT INTO session (task_id, begin_at, end_at, duration_min, notes)
+         VALUES (?1, '2026-01-01T09:00:00', '2026-01-01T09:25:00', 25, '')",
+        [task_id],
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO session (task_id, begin_at, end_at, duration_min, notes) VALUES (1, '2026-03-01T10:00:00', '2026-03-01T10:25:00', 25, 'Did stuff')",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO todo (task_id, description, done, position, completed_at) VALUES (1, 'Done todo', 1, 0, '2026-03-01T10:15:00')",
-        [],
+        "INSERT INTO session (task_id, begin_at, end_at, duration_min, notes)
+         VALUES (?1, '2026-01-02T09:00:00', '2026-01-02T09:25:00', 25, '')",
+        [task_id],
     )
     .unwrap();
 
-    // Query sessions in range
-    let mut stmt = conn
-        .prepare(
-            "SELECT t.description, s.notes FROM session s
-             JOIN task t ON s.task_id = t.id
-             WHERE s.begin_at >= '2026-03-01T00:00:00' AND s.begin_at <= '2026-03-01T23:59:59' AND s.end_at IS NOT NULL",
-        )
+    // Act
+    let sessions = queries::list_sessions(&conn, task_id).unwrap();
+
+    // Assert: newest begin_at appears first
+    assert_eq!(sessions.len(), 2);
+    assert!(sessions[0].begin_at > sessions[1].begin_at);
+}
+
+#[test]
+fn delete_session_removes_the_session() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    let session_id = queries::start_session(&conn, task_id, 25).unwrap();
+
+    // Act
+    queries::delete_session(&conn, session_id).unwrap();
+
+    // Assert
+    let sessions = queries::list_sessions(&conn, task_id).unwrap();
+    assert!(sessions.is_empty());
+}
+
+#[test]
+fn close_orphaned_sessions_closes_every_open_session() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    queries::start_session(&conn, task_id, 25).unwrap();
+    queries::start_session(&conn, task_id, 25).unwrap();
+
+    // Act
+    let closed = queries::close_orphaned_sessions(&conn).unwrap();
+
+    // Assert
+    assert_eq!(closed, 2);
+    let active = queries::get_active_session(&conn).unwrap();
+    assert!(active.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Summary queries
+// ---------------------------------------------------------------------------
+
+#[test]
+fn sessions_in_range_returns_completed_sessions_within_window() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task A", &TaskList::Inbox).unwrap();
+    conn.execute(
+        "INSERT INTO session (task_id, begin_at, end_at, duration_min, notes)
+         VALUES (?1, '2026-03-01T10:00:00', '2026-03-01T10:25:00', 25, 'did work')",
+        [task_id],
+    )
+    .unwrap();
+    // Outside the window
+    conn.execute(
+        "INSERT INTO session (task_id, begin_at, end_at, duration_min, notes)
+         VALUES (?1, '2026-03-02T10:00:00', '2026-03-02T10:25:00', 25, '')",
+        [task_id],
+    )
+    .unwrap();
+
+    let from = "2026-03-01T00:00:00"
+        .parse::<chrono::NaiveDateTime>()
         .unwrap();
-    let results: Vec<(String, String)> = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap()
-        .map(|r| r.unwrap())
-        .collect();
+    let to = "2026-03-01T23:59:59"
+        .parse::<chrono::NaiveDateTime>()
+        .unwrap();
+
+    // Act
+    let results = queries::sessions_in_range(&conn, from, to).unwrap();
+
+    // Assert
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].0, "Task A");
-    assert_eq!(results[0].1, "Did stuff");
+    assert_eq!(results[0].0.description, "Task A");
+    assert_eq!(results[0].1.notes, "did work");
+}
 
-    // Query completed todos in range
-    let mut stmt = conn
-        .prepare(
-            "SELECT t.description, td.description FROM todo td
-             JOIN task t ON td.task_id = t.id
-             WHERE td.completed_at >= '2026-03-01T00:00:00' AND td.completed_at <= '2026-03-01T23:59:59'",
-        )
+#[test]
+fn sessions_in_range_excludes_open_sessions() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    // Open session (no end_at)
+    conn.execute(
+        "INSERT INTO session (task_id, begin_at, duration_min, notes)
+         VALUES (?1, '2026-03-01T10:00:00', 25, '')",
+        [task_id],
+    )
+    .unwrap();
+
+    let from = "2026-03-01T00:00:00"
+        .parse::<chrono::NaiveDateTime>()
         .unwrap();
-    let results: Vec<(String, String)> = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap()
-        .map(|r| r.unwrap())
-        .collect();
+    let to = "2026-03-01T23:59:59"
+        .parse::<chrono::NaiveDateTime>()
+        .unwrap();
+
+    // Act
+    let results = queries::sessions_in_range(&conn, from, to).unwrap();
+
+    // Assert
+    assert!(results.is_empty());
+}
+
+#[test]
+fn todos_completed_in_range_returns_todos_completed_within_window() {
+    // Arrange
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task B", &TaskList::Inbox).unwrap();
+    conn.execute(
+        "INSERT INTO todo (task_id, description, done, position, completed_at)
+         VALUES (?1, 'Write report', 1, 0, '2026-03-01T15:00:00')",
+        [task_id],
+    )
+    .unwrap();
+    // Outside window
+    conn.execute(
+        "INSERT INTO todo (task_id, description, done, position, completed_at)
+         VALUES (?1, 'Other todo', 1, 1, '2026-03-02T15:00:00')",
+        [task_id],
+    )
+    .unwrap();
+
+    let from = "2026-03-01T00:00:00"
+        .parse::<chrono::NaiveDateTime>()
+        .unwrap();
+    let to = "2026-03-01T23:59:59"
+        .parse::<chrono::NaiveDateTime>()
+        .unwrap();
+
+    // Act
+    let results = queries::todos_completed_in_range(&conn, from, to).unwrap();
+
+    // Assert
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].0, "Task A");
-    assert_eq!(results[0].1, "Done todo");
+    assert_eq!(results[0].0.description, "Task B");
+    assert_eq!(results[0].1.description, "Write report");
+}
+
+// ---------------------------------------------------------------------------
+// Archive
+// ---------------------------------------------------------------------------
+
+#[test]
+fn archive_task_moves_task_to_done_list() {
+    // Arrange
+    let conn = setup();
+    let id = queries::insert_task(&conn, "Finished work", &TaskList::Inbox).unwrap();
+
+    // Act
+    queries::archive_task(&conn, id).unwrap();
+
+    // Assert
+    let task = queries::get_task(&conn, id).unwrap();
+    assert_eq!(task.list, TaskList::Done);
+    assert!(queries::list_tasks(&conn, &TaskList::Inbox)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn restore_task_moves_archived_task_back_to_inbox() {
+    // Arrange
+    let conn = setup();
+    let id = queries::insert_task(&conn, "To restore", &TaskList::Inbox).unwrap();
+    queries::archive_task(&conn, id).unwrap();
+
+    // Act
+    queries::restore_task(&conn, id).unwrap();
+
+    // Assert
+    let task = queries::get_task(&conn, id).unwrap();
+    assert_eq!(task.list, TaskList::Inbox);
 }
