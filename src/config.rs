@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Duration of a new session in minutes (default: 25)
+    /// Duration of a new session in minutes (default: 45)
     pub session_duration_min: u32,
     /// Directory where summary reports are written
     pub summary_export_dir: PathBuf,
@@ -19,7 +19,7 @@ impl Default for Config {
             .unwrap_or_else(|| PathBuf::from("."))
             .join("logbuch");
         Self {
-            session_duration_min: 25,
+            session_duration_min: 45,
             summary_export_dir: data_dir.join("reports"),
             db_path: data_dir.join("logbuch.db"),
         }
@@ -96,7 +96,7 @@ impl Config {
 # Full documentation: https://github.com/odlot/logbuch
 
 # Duration of a new Pomodoro session in minutes.
-session_duration_min = {duration}
+session_duration_min = {duration}  # default: 45
 
 # Directory where daily/weekly summary reports are written (Markdown).
 summary_export_dir = "{summary}"

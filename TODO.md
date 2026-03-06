@@ -21,7 +21,7 @@ logbuch edit <id> <description>                 rename a task
 logbuch todo <task-id> <description>            add a todo to a task
 logbuch check <task-id> <todo-id>               toggle a todo done/undone
 logbuch edit <task-id> <todo-id> <description>  rename a todo
-logbuch start <id> [--min <n>]                  start a pomodoro (default 25min)
+logbuch start <id> [--min <n>]                  start a pomodoro (default 45min)
 logbuch stop                                    cancel the running session
 logbuch note <text>                             attach timestamped note to active session (alias: n)
 logbuch status                                  show running session and time remaining

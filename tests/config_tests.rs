@@ -11,12 +11,12 @@ static ENV_MUTEX: Mutex<()> = Mutex::new(());
 // ---------------------------------------------------------------------------
 
 #[test]
-fn config_default_session_duration_is_25_minutes() {
+fn config_default_session_duration_is_45_minutes() {
     // Act
     let config = Config::default();
 
     // Assert
-    assert_eq!(config.session_duration_min, 25);
+    assert_eq!(config.session_duration_min, 45);
 }
 
 // ---------------------------------------------------------------------------
@@ -33,7 +33,7 @@ fn config_load_returns_defaults_when_config_file_does_not_exist() {
     let config = Config::load(Some(&path)).unwrap();
 
     // Assert
-    assert_eq!(config.session_duration_min, 25);
+    assert_eq!(config.session_duration_min, 45);
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn config_env_override_ignores_non_numeric_session_duration() {
     config.apply_env_overrides();
 
     // Assert: unchanged from default
-    assert_eq!(config.session_duration_min, 25);
+    assert_eq!(config.session_duration_min, 45);
 
     std::env::remove_var("LOGBUCH_SESSION_DURATION");
 }

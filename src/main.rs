@@ -86,7 +86,7 @@ enum Commands {
         /// Todo ID
         todo_id: i64,
     },
-    /// Start a pomodoro session (default 25 min)
+    /// Start a pomodoro session (default 45 min)
     Start {
         /// Task ID
         id: i64,
