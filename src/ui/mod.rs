@@ -1,3 +1,4 @@
+pub mod archive;
 pub mod board;
 pub mod input;
 pub mod session_view;
@@ -13,6 +14,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         crate::app::View::Board => board::draw(frame, app),
         crate::app::View::TaskDetail(task_id) => task_detail::draw(frame, app, task_id),
         crate::app::View::ActiveSession(session_id) => session_view::draw(frame, app, session_id),
+        crate::app::View::Archive => archive::draw(frame, app),
     }
 
     if app.show_help {
@@ -45,8 +47,10 @@ fn draw_help_overlay(frame: &mut Frame, app: &App) {
              Enter     Open task detail\n\
              n         New task\n\
              d         Delete task (confirm: d)\n\
+             A (Shift) Archive task\n\
              H (Shift) Move task left\n\
              L (Shift) Move task right\n\
+             a         Open archive view\n\
              r d       Daily summary\n\
              r w       Weekly summary\n\
              /         Search tasks\n\
@@ -73,6 +77,16 @@ fn draw_help_overlay(frame: &mut Frame, app: &App) {
              Esc       End session\n\
              Enter     Submit note\n\
              Type      Add notes\n\
+             ?         Toggle help"
+        }
+        crate::app::View::Archive => {
+            "Archive View\n\n\
+             j/Down    Select next task\n\
+             k/Up      Select previous task\n\
+             Enter     View task detail\n\
+             r         Restore task to Inbox\n\
+             d         Delete permanently (confirm: d)\n\
+             Esc       Back to board\n\
              ?         Toggle help"
         }
     };
@@ -161,8 +175,11 @@ pub fn status_bar_text(app: &App) -> String {
     let mut parts = Vec::new();
 
     match &app.view {
-        crate::app::View::Board => {
-            parts.push("n:new  d:delete  H/L:move  Enter:open  ?:help".to_string())
+        crate::app::View::Board => parts.push(
+            "n:new  d:del  A:archive  a:view-archive  H/L:move  Enter:open  ?:help".to_string(),
+        ),
+        crate::app::View::Archive => {
+            parts.push("r:restore  d:delete  Enter:view  Esc:back  ?:help".to_string())
         }
         crate::app::View::TaskDetail(_) => parts
             .push("e:edit  a:todo  x:toggle  D:delete  s:session  Esc:back  ?:help".to_string()),

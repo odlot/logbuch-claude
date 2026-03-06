@@ -392,3 +392,21 @@ pub fn todos_completed_in_range(
     }
     Ok(results)
 }
+
+// --- Archive ---
+
+pub fn archive_task(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE task SET list = 'done', updated_at = strftime('%Y-%m-%dT%H:%M:%S','now','localtime') WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(())
+}
+
+pub fn restore_task(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE task SET list = 'inbox', updated_at = strftime('%Y-%m-%dT%H:%M:%S','now','localtime') WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(())
+}
