@@ -14,6 +14,7 @@ pub enum View {
     Board,
     TaskDetail(i64),
     ActiveSession(i64),
+    Archive,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,6 +112,10 @@ pub struct App {
     pub search_results: Vec<Task>,
     pub search_selected: usize,
 
+    // Archive view
+    pub archive_tasks: Vec<Task>,
+    pub archive_list_state: ListState,
+
     // DB and config
     pub db: Connection,
     pub config: Config,
@@ -155,6 +160,9 @@ impl App {
             search_results: Vec::new(),
             search_selected: 0,
 
+            archive_tasks: Vec::new(),
+            archive_list_state: ListState::default(),
+
             db,
             config,
         };
@@ -170,6 +178,98 @@ impl App {
         self.clamp_selection(TaskList::Inbox);
         self.clamp_selection(TaskList::InProgress);
         self.clamp_selection(TaskList::Backlog);
+        Ok(())
+    }
+
+    pub fn reload_archive(&mut self) -> Result<()> {
+        self.archive_tasks = queries::list_tasks(&self.db, &TaskList::Done)?;
+        if self.archive_tasks.is_empty() {
+            self.archive_list_state.select(None);
+        } else {
+            let idx = self
+                .archive_list_state
+                .selected()
+                .unwrap_or(0)
+                .min(self.archive_tasks.len() - 1);
+            self.archive_list_state.select(Some(idx));
+        }
+        Ok(())
+    }
+
+    fn handle_archive_key(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc => {
+                self.view = View::Board;
+            }
+            KeyCode::Char('?') => {
+                self.show_help = !self.show_help;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !self.archive_tasks.is_empty() {
+                    let idx = self
+                        .archive_list_state
+                        .selected()
+                        .unwrap_or(0)
+                        .saturating_add(1)
+                        .min(self.archive_tasks.len() - 1);
+                    self.archive_list_state.select(Some(idx));
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if !self.archive_tasks.is_empty() {
+                    let idx = self
+                        .archive_list_state
+                        .selected()
+                        .unwrap_or(0)
+                        .saturating_sub(1);
+                    self.archive_list_state.select(Some(idx));
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(idx) = self.archive_list_state.selected() {
+                    if let Some(task) = self.archive_tasks.get(idx) {
+                        let task_id = task.id;
+                        self.view = View::TaskDetail(task_id);
+                        self.reload_detail(task_id)?;
+                    }
+                }
+            }
+            KeyCode::Char('r') => {
+                if let Some(idx) = self.archive_list_state.selected() {
+                    if let Some(task) = self.archive_tasks.get(idx) {
+                        let task_id = task.id;
+                        let desc = task.description.clone();
+                        queries::restore_task(&self.db, task_id)?;
+                        self.reload_archive()?;
+                        self.reload_tasks()?;
+                        self.set_status(format!("Restored '{}' to Inbox", desc));
+                    }
+                }
+            }
+            KeyCode::Char('d') => {
+                if let Some(idx) = self.archive_list_state.selected() {
+                    if let Some(task) = self.archive_tasks.get(idx) {
+                        let task_id = task.id;
+                        match self.confirm_delete.take() {
+                            Some(ConfirmDelete::Task(id)) if id == task_id => {
+                                queries::delete_task(&self.db, task_id)?;
+                                self.reload_archive()?;
+                                self.set_status("Task permanently deleted");
+                            }
+                            _ => {
+                                self.confirm_delete = Some(ConfirmDelete::Task(task_id));
+                                self.set_status(
+                                    "Press d again to permanently delete, any other key to cancel",
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {
+                self.confirm_delete = None;
+            }
+        }
         Ok(())
     }
 
@@ -206,6 +306,7 @@ impl App {
             TaskList::Inbox => &self.tasks_inbox,
             TaskList::InProgress => &self.tasks_in_progress,
             TaskList::Backlog => &self.tasks_backlog,
+            TaskList::Done => &self.archive_tasks,
         }
     }
 
@@ -476,6 +577,7 @@ impl App {
             View::Board => self.handle_board_key(key),
             View::TaskDetail(task_id) => self.handle_detail_key(key, *task_id),
             View::ActiveSession(_session_id) => self.handle_session_key(key),
+            View::Archive => self.handle_archive_key(key),
         }
     }
 
@@ -569,6 +671,19 @@ impl App {
             }
             KeyCode::Char('r') => {
                 self.pending_r = true;
+            }
+            KeyCode::Char('a') => {
+                self.reload_archive()?;
+                self.view = View::Archive;
+            }
+            KeyCode::Char('A') => {
+                if let Some(task) = self.selected_task() {
+                    let task_id = task.id;
+                    let desc = task.description.clone();
+                    queries::archive_task(&self.db, task_id)?;
+                    self.reload_tasks()?;
+                    self.set_status(format!("Archived '{}'", desc));
+                }
             }
             KeyCode::Char('/') => {
                 self.show_search = true;
