@@ -22,8 +22,15 @@ jobs:
       - name: Read version from Cargo.toml and tag
         run: |
           version=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          echo "Tagging v$version"
+          echo "Version: $version"
+
+          if git ls-remote --tags origin | grep -q "refs/tags/v$version$"; then
+            echo "::error::Tag v$version already exists. Run ./scripts/bump-version.sh in develop before opening the release PR."
+            exit 1
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "v$version"
           git push https://x-access-token:${{ secrets.RELEASE_TOKEN }}@github.com/${{ github.repository }} "v$version"
+          echo "Tagged and pushed v$version"
