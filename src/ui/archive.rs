@@ -49,12 +49,5 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
 
     // Status bar
-    let mut status_parts = vec!["r:restore  d:delete  Enter:view  Esc:back  ?:help".to_string()];
-    if let Some((msg, _)) = &app.status_message {
-        status_parts.push(msg.clone());
-    }
-    frame.render_widget(
-        Paragraph::new(status_parts.join(" | ")).style(Style::default().fg(Color::DarkGray)),
-        chunks[1],
-    );
+    super::draw_status_bar(frame, app, chunks[1]);
 }

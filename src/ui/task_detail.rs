@@ -212,8 +212,9 @@ pub fn draw(frame: &mut Frame, app: &mut App, task_id: i64) {
                 String::new()
             } else {
                 let first_line = session.notes.lines().next().unwrap_or("");
-                let truncated = if first_line.len() > 30 {
-                    format!(" \"{}...\"", &first_line[..27])
+                let truncated = if first_line.chars().count() > 30 {
+                    let t: String = first_line.chars().take(27).collect();
+                    format!(" \"{}...\"", t)
                 } else {
                     format!(" \"{}\"", first_line)
                 };
@@ -284,18 +285,5 @@ fn draw_detail_status(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let status_left = super::status_bar_text(app);
-    let status_right = super::session_indicator(app).unwrap_or_default();
-
-    let left_width = area.width.saturating_sub(status_right.len() as u16 + 1);
-    let bar_chunks =
-        Layout::horizontal([Constraint::Length(left_width), Constraint::Min(1)]).split(area);
-
-    let left = Paragraph::new(status_left).style(Style::default().fg(Color::DarkGray));
-    let right = Paragraph::new(status_right)
-        .style(Style::default().fg(Color::Green))
-        .alignment(Alignment::Right);
-
-    frame.render_widget(left, bar_chunks[0]);
-    frame.render_widget(right, bar_chunks[1]);
+    super::draw_status_bar(frame, app, area);
 }

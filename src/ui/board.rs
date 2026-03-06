@@ -52,8 +52,9 @@ fn draw_column(frame: &mut Frame, app: &App, list: &TaskList, area: Rect) {
             } else {
                 "   "
             };
-            let desc = if task.description.len() > 40 {
-                format!("{}...", &task.description[..37])
+            let desc = if task.description.chars().count() > 40 {
+                let truncated: String = task.description.chars().take(37).collect();
+                format!("{}...", truncated)
             } else {
                 task.description.clone()
             };
@@ -104,20 +105,6 @@ fn draw_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             area.y,
         ));
     } else {
-        let status_left = super::status_bar_text(app);
-        let status_right = super::session_indicator(app).unwrap_or_default();
-
-        let left_width = area.width.saturating_sub(status_right.len() as u16 + 1);
-
-        let bar_chunks =
-            Layout::horizontal([Constraint::Length(left_width), Constraint::Min(1)]).split(area);
-
-        let left = Paragraph::new(status_left).style(Style::default().fg(Color::DarkGray));
-        let right = Paragraph::new(status_right)
-            .style(Style::default().fg(Color::Green))
-            .alignment(Alignment::Right);
-
-        frame.render_widget(left, bar_chunks[0]);
-        frame.render_widget(right, bar_chunks[1]);
+        super::draw_status_bar(frame, app, area);
     }
 }
