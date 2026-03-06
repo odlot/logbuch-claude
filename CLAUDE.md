@@ -4,17 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Logbuch — a keyboard-driven TUI task-management and productivity app with pomodoro sessions. Licensed under GPL-3.0. Written in Rust.
+Logbuch — a plain CLI developer productivity tool for capturing tasks, todos, and time-boxing work with pomodoro sessions. Licensed under GPL-3.0. Written in Rust.
 
 ## Build & Run
 
 ```bash
 cargo build              # debug build
 cargo build --release    # release build
-cargo run                # run the TUI
-cargo run -- --summary daily   # generate daily report without TUI
-cargo run -- --summary weekly  # generate weekly report without TUI
-cargo run -- --config /path/to/config.toml  # custom config path
+cargo run                # print help and exit 0
+cargo run -- add "fix the bug"   # add a task
+cargo run -- list                # list all tasks
+cargo run -- --db /tmp/test.db list   # override DB path
 ```
 
 ## Test & Lint
@@ -28,15 +28,23 @@ cargo clippy --all-targets --all-features  # lint
 
 ## Architecture
 
-The app follows a modified Elm Architecture (Model-Update-View):
+Plain CLI with clap subcommands. No TUI.
 
-- **`src/app.rs`** — Central state machine (`App` struct). Holds all state, processes key events, dispatches DB mutations. The largest and most important file.
-- **`src/event.rs`** — Crossterm event loop in a background thread. Sends `Key`, `Tick` (250ms), and `Resize` events via mpsc channel.
-- **`src/ui/`** — View layer. `board.rs` (3-column kanban), `task_detail.rs` (description/todos/sessions), `session_view.rs` (timer/notes). The `mod.rs` handles view dispatch and help overlay.
+- **`src/main.rs`** — clap CLI definition (`Commands` enum) and dispatch.
+- **`src/cmd/`** — Command implementations split by concern:
+  - `tasks.rs` — add, list, show, done, rm, defer, edit
+  - `todos.rs` — todo, check
+  - `sessions.rs` — start, stop, note, status, `_notify` (hidden background process)
+  - `log.rs` — log (daily/weekly)
+- **`src/output.rs`** — TTY detection (`Out` struct with ANSI colour helpers; strips colour when stdout is not a terminal).
 - **`src/db/`** — SQLite persistence. `migrations.rs` (schema versioning), `queries.rs` (all CRUD operations). Uses rusqlite with bundled SQLite.
 - **`src/model/`** — Data structs: `Task` (with `TaskList` enum for inbox/in_progress/backlog), `Session`, `Todo`.
 - **`src/config.rs`** — TOML config loading from XDG paths (`~/.config/logbuch/config.toml`). Defaults: 25min sessions.
 - **`src/summary.rs`** — Markdown report generation (daily/weekly), exported to files.
+
+### Pomodoro notification
+
+`logbuch start <id>` records the session in the DB, then spawns a detached child process (`logbuch _notify --session-id <n> --seconds <n> --db <path>`) that sleeps, marks the session complete, fires a desktop notification via `notify-rust`, and exits. The child PID is written to `notify.pid` in the DB directory. `logbuch stop` kills the child and ends the session.
 
 ## Data Storage
 

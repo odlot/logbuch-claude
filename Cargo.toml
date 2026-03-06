@@ -2,13 +2,11 @@
 name = "logbuch"
 version = "0.1.10"
 edition = "2021"
-description = "A keyboard-driven TUI task-management and productivity app with pomodoro sessions"
+description = "Developer productivity — tasks, todos, pomodoro sessions"
 license = "GPL-3.0-only"
 rust-version = "1.75.0"
 
 [dependencies]
-ratatui = "0.29"
-crossterm = "0.28"
 rusqlite = { version = "0.32", features = ["bundled"] }
 notify-rust = "4"
 chrono = { version = "0.4", features = ["serde"] }
