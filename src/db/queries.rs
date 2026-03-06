@@ -10,8 +10,15 @@ const DATETIME_FMT: &str = "%Y-%m-%dT%H:%M:%S";
 
 pub fn list_tasks(conn: &Connection, list: &TaskList) -> Result<Vec<Task>> {
     let mut stmt = conn.prepare(
-        "SELECT id, description, list, position, created_at, updated_at
-         FROM task WHERE list = ?1 ORDER BY position ASC",
+        "SELECT t.id, t.description, t.list, t.position, t.created_at, t.updated_at,
+                CAST(julianday('now','localtime') - julianday(
+                    COALESCE(MAX(s.begin_at), t.created_at)
+                ) AS INTEGER) AS days_inactive
+         FROM task t
+         LEFT JOIN session s ON s.task_id = t.id
+         WHERE t.list = ?1
+         GROUP BY t.id
+         ORDER BY t.position ASC",
     )?;
     let rows = stmt.query_map(params![list.as_str()], |row| {
         Ok(Task {
@@ -23,6 +30,7 @@ pub fn list_tasks(conn: &Connection, list: &TaskList) -> Result<Vec<Task>> {
                 .unwrap_or_default(),
             updated_at: NaiveDateTime::parse_from_str(&row.get::<_, String>(5)?, DATETIME_FMT)
                 .unwrap_or_default(),
+            days_inactive: row.get::<_, u32>(6).unwrap_or(0),
         })
     })?;
     let mut tasks = Vec::new();
@@ -32,10 +40,42 @@ pub fn list_tasks(conn: &Connection, list: &TaskList) -> Result<Vec<Task>> {
     Ok(tasks)
 }
 
+/// Delete tasks in active lists (inbox/in_progress/backlog) that have not had
+/// a session in `days` or more days (using creation date as the baseline for
+/// tasks that were never worked on). Returns the descriptions of deleted tasks.
+pub fn purge_stale_tasks(conn: &Connection, days: u32) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.description
+         FROM task t
+         LEFT JOIN session s ON s.task_id = t.id
+         WHERE t.list IN ('inbox','in_progress','backlog')
+         GROUP BY t.id
+         HAVING CAST(julianday('now','localtime') - julianday(
+                    COALESCE(MAX(s.begin_at), t.created_at)
+                ) AS INTEGER) >= ?1",
+    )?;
+    let rows = stmt.query_map(params![days], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut deleted = Vec::new();
+    for row in rows {
+        let (id, desc) = row?;
+        conn.execute("DELETE FROM task WHERE id = ?1", params![id])?;
+        deleted.push(desc);
+    }
+    Ok(deleted)
+}
+
 pub fn get_task(conn: &Connection, id: i64) -> Result<Task> {
     let task = conn.query_row(
-        "SELECT id, description, list, position, created_at, updated_at
-         FROM task WHERE id = ?1",
+        "SELECT t.id, t.description, t.list, t.position, t.created_at, t.updated_at,
+                CAST(julianday('now','localtime') - julianday(
+                    COALESCE(MAX(s.begin_at), t.created_at)
+                ) AS INTEGER) AS days_inactive
+         FROM task t
+         LEFT JOIN session s ON s.task_id = t.id
+         WHERE t.id = ?1
+         GROUP BY t.id",
         params![id],
         |row| {
             Ok(Task {
@@ -47,6 +87,7 @@ pub fn get_task(conn: &Connection, id: i64) -> Result<Task> {
                     .unwrap_or_default(),
                 updated_at: NaiveDateTime::parse_from_str(&row.get::<_, String>(5)?, DATETIME_FMT)
                     .unwrap_or_default(),
+                days_inactive: row.get::<_, u32>(6).unwrap_or(0),
             })
         },
     )?;
@@ -327,6 +368,7 @@ pub fn sessions_in_range(
                 .unwrap_or_default(),
             updated_at: NaiveDateTime::parse_from_str(&row.get::<_, String>(5)?, DATETIME_FMT)
                 .unwrap_or_default(),
+            days_inactive: 0,
         };
         let session = Session {
             id: row.get(6)?,
@@ -373,6 +415,7 @@ pub fn todos_completed_in_range(
                 .unwrap_or_default(),
             updated_at: NaiveDateTime::parse_from_str(&row.get::<_, String>(5)?, DATETIME_FMT)
                 .unwrap_or_default(),
+            days_inactive: 0,
         };
         let todo = Todo {
             id: row.get(6)?,

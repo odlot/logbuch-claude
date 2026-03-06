@@ -61,6 +61,10 @@ fn draw_column(frame: &mut Frame, app: &App, list: &TaskList, area: Rect) {
 
             let style = if is_active && i == selected {
                 Style::default().fg(Color::Black).bg(Color::Cyan)
+            } else if task.days_inactive >= 21 {
+                Style::default().fg(Color::Red)
+            } else if task.days_inactive >= 14 {
+                Style::default().fg(Color::Yellow)
             } else {
                 Style::default()
             };

@@ -74,4 +74,6 @@ pub struct Task {
     pub position: i32,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+    /// Days since the last session, or since creation if never worked on.
+    pub days_inactive: u32,
 }

@@ -167,6 +167,13 @@ impl App {
             config,
         };
         app.reload_tasks()?;
+        let purged = queries::purge_stale_tasks(&app.db, 28)?;
+        if !purged.is_empty() {
+            app.set_status(format!(
+                "Auto-deleted {} stale task(s) (28+ days inactive)",
+                purged.len()
+            ));
+        }
         Ok(app)
     }
 
