@@ -200,78 +200,6 @@ fn delete_task_removes_it_and_cascades_to_todos_and_sessions() {
     assert_eq!(session_count, 0);
 }
 
-#[test]
-fn list_tasks_reports_zero_days_inactive_for_brand_new_task() {
-    // Arrange
-    let conn = setup();
-
-    // Act
-    queries::insert_task(&conn, "Fresh task", &TaskList::Inbox).unwrap();
-    let tasks = queries::list_tasks(&conn, &TaskList::Inbox).unwrap();
-
-    // Assert: created moments ago, inactivity must be 0
-    assert_eq!(tasks[0].days_inactive, 0);
-}
-
-#[test]
-fn list_tasks_reports_nonzero_days_inactive_for_old_task() {
-    // Arrange
-    let conn = setup();
-    let id = queries::insert_task(&conn, "Old task", &TaskList::Inbox).unwrap();
-    conn.execute(
-        "UPDATE task SET created_at = '2000-01-01T00:00:00' WHERE id = ?1",
-        [id],
-    )
-    .unwrap();
-
-    // Act
-    let tasks = queries::list_tasks(&conn, &TaskList::Inbox).unwrap();
-
-    // Assert: created over 20 years ago
-    assert!(tasks[0].days_inactive > 1000);
-}
-
-#[test]
-fn purge_stale_tasks_deletes_tasks_older_than_threshold() {
-    // Arrange
-    let conn = setup();
-    let stale_id = queries::insert_task(&conn, "Stale task", &TaskList::Inbox).unwrap();
-    conn.execute(
-        "UPDATE task SET created_at = '2000-01-01T00:00:00' WHERE id = ?1",
-        [stale_id],
-    )
-    .unwrap();
-    queries::insert_task(&conn, "Fresh task", &TaskList::Inbox).unwrap();
-
-    // Act
-    let deleted = queries::purge_stale_tasks(&conn, 28).unwrap();
-
-    // Assert
-    assert_eq!(deleted, vec!["Stale task"]);
-    let remaining = queries::list_tasks(&conn, &TaskList::Inbox).unwrap();
-    assert_eq!(remaining.len(), 1);
-    assert_eq!(remaining[0].description, "Fresh task");
-}
-
-#[test]
-fn purge_stale_tasks_does_not_delete_archived_tasks() {
-    // Arrange
-    let conn = setup();
-    let id = queries::insert_task(&conn, "Done task", &TaskList::Inbox).unwrap();
-    conn.execute(
-        "UPDATE task SET created_at = '2000-01-01T00:00:00' WHERE id = ?1",
-        [id],
-    )
-    .unwrap();
-    queries::archive_task(&conn, id).unwrap();
-
-    // Act
-    let deleted = queries::purge_stale_tasks(&conn, 28).unwrap();
-
-    // Assert: archived tasks are excluded from purge
-    assert!(deleted.is_empty());
-}
-
 // ---------------------------------------------------------------------------
 // Todo CRUD
 // ---------------------------------------------------------------------------
@@ -583,8 +511,47 @@ fn close_orphaned_sessions_closes_every_open_session() {
     assert!(active.is_none());
 }
 
+#[test]
+fn last_worked_task_returns_task_id_of_most_recent_session() {
+    // Arrange
+    let conn = setup();
+    let task_a = queries::insert_task(&conn, "Task A", &TaskList::Inbox).unwrap();
+    let task_b = queries::insert_task(&conn, "Task B", &TaskList::Inbox).unwrap();
+    conn.execute(
+        "INSERT INTO session (task_id, begin_at, end_at, duration_min, notes)
+         VALUES (?1, '2026-01-01T09:00:00', '2026-01-01T09:45:00', 45, '')",
+        [task_a],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO session (task_id, begin_at, end_at, duration_min, notes)
+         VALUES (?1, '2026-01-02T09:00:00', '2026-01-02T09:45:00', 45, '')",
+        [task_b],
+    )
+    .unwrap();
+
+    // Act
+    let result = queries::last_worked_task(&conn).unwrap();
+
+    // Assert: Task B has the more recent session
+    assert_eq!(result, Some(task_b));
+}
+
+#[test]
+fn last_worked_task_returns_none_when_no_sessions_exist() {
+    // Arrange
+    let conn = setup();
+    queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+
+    // Act
+    let result = queries::last_worked_task(&conn).unwrap();
+
+    // Assert
+    assert!(result.is_none());
+}
+
 // ---------------------------------------------------------------------------
-// Summary queries
+// Range queries
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -627,7 +594,6 @@ fn sessions_in_range_excludes_open_sessions() {
     // Arrange
     let conn = setup();
     let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
-    // Open session (no end_at)
     conn.execute(
         "INSERT INTO session (task_id, begin_at, duration_min, notes)
          VALUES (?1, '2026-03-01T10:00:00', 25, '')",
@@ -682,40 +648,4 @@ fn todos_completed_in_range_returns_todos_completed_within_window() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].0.description, "Task B");
     assert_eq!(results[0].1.description, "Write report");
-}
-
-// ---------------------------------------------------------------------------
-// Archive
-// ---------------------------------------------------------------------------
-
-#[test]
-fn archive_task_moves_task_to_done_list() {
-    // Arrange
-    let conn = setup();
-    let id = queries::insert_task(&conn, "Finished work", &TaskList::Inbox).unwrap();
-
-    // Act
-    queries::archive_task(&conn, id).unwrap();
-
-    // Assert
-    let task = queries::get_task(&conn, id).unwrap();
-    assert_eq!(task.list, TaskList::Done);
-    assert!(queries::list_tasks(&conn, &TaskList::Inbox)
-        .unwrap()
-        .is_empty());
-}
-
-#[test]
-fn restore_task_moves_archived_task_back_to_inbox() {
-    // Arrange
-    let conn = setup();
-    let id = queries::insert_task(&conn, "To restore", &TaskList::Inbox).unwrap();
-    queries::archive_task(&conn, id).unwrap();
-
-    // Act
-    queries::restore_task(&conn, id).unwrap();
-
-    // Assert
-    let task = queries::get_task(&conn, id).unwrap();
-    assert_eq!(task.list, TaskList::Inbox);
 }

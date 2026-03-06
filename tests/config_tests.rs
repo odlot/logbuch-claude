@@ -76,7 +76,6 @@ fn config_write_to_creates_a_file_that_can_be_loaded_back() {
     let original = Config {
         session_duration_min: 45,
         db_path: dir.path().join("data.db"),
-        summary_export_dir: dir.path().join("reports"),
     };
 
     // Act
@@ -86,7 +85,6 @@ fn config_write_to_creates_a_file_that_can_be_loaded_back() {
     // Assert
     assert_eq!(loaded.session_duration_min, 45);
     assert_eq!(loaded.db_path, dir.path().join("data.db"));
-    assert_eq!(loaded.summary_export_dir, dir.path().join("reports"));
 }
 
 #[test]
@@ -122,23 +120,6 @@ fn config_env_override_sets_db_path() {
     assert_eq!(config.db_path, PathBuf::from("/env/override.db"));
 
     std::env::remove_var("LOGBUCH_DB_PATH");
-}
-
-#[test]
-fn config_env_override_sets_summary_dir() {
-    let _guard = ENV_MUTEX.lock().unwrap();
-
-    // Arrange
-    std::env::set_var("LOGBUCH_SUMMARY_DIR", "/env/reports");
-    let mut config = Config::default();
-
-    // Act
-    config.apply_env_overrides();
-
-    // Assert
-    assert_eq!(config.summary_export_dir, PathBuf::from("/env/reports"));
-
-    std::env::remove_var("LOGBUCH_SUMMARY_DIR");
 }
 
 #[test]

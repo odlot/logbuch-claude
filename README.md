@@ -1,10 +1,10 @@
 # Logbuch
 
-A keyboard-driven TUI for task management and focused work sessions (Pomodoro-style). Tasks live in a three-column kanban board; each task has a description, a checklist of todos, and a history of timed work sessions.
+A plain CLI for developer task management and focused work sessions.
+
+Tasks have a description, a checklist of todos, and a history of timed work sessions. The pomodoro timer runs in the background — you get a desktop notification when it ends and your shell prompt is never blocked.
 
 ## Installation
-
-**Prerequisites:** Rust stable toolchain (`rustup`).
 
 ```bash
 git clone https://github.com/odlot/logbuch
@@ -13,231 +13,169 @@ cargo build --release
 # Binary at target/release/logbuch — copy it anywhere on your $PATH
 ```
 
-## Usage
+## Commands
+
+```
+logbuch add <description>                       add a task to inbox
+logbuch list / ls                               show all tasks
+logbuch show <id>                               full task detail (todos + sessions)
+logbuch done <id>                               mark task complete and remove it
+logbuch rm <id> [--yes]                         delete a task (prompts unless --yes)
+logbuch defer <id>                              move task to backlog
+logbuch edit <id> <description>                 rename a task
+logbuch edit <task-id> <todo-id> <description>  rename a todo
+
+logbuch todo <task-id> <description>            add a todo to a task
+logbuch check <task-id> <todo-id>               toggle a todo done/undone
+
+logbuch start <id> [--min <n>]                  start a session (default 45 min)
+logbuch stop                                    cancel the running session
+logbuch resume [--min <n>]                      new session on the last worked task
+logbuch note <text> / n <text>                  attach a timestamped note to active session
+logbuch status                                  show running session + time remaining
+
+logbuch log                                     today's activity
+logbuch log --week                              this week (Mon–Sun)
+logbuch log <yyyy-mm-dd>                        specific date
+logbuch log <yyyy-mm-dd> <yyyy-mm-dd>           date range
+```
+
+`logbuch` with no arguments prints the command list and exits 0.
+`logbuch <command> --help` for per-command help.
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | success |
+| `1` | error (task not found, bad arguments, etc.) |
+
+`logbuch status` exits `0` if a session is running, `1` if not — making it
+scriptable:
 
 ```bash
-logbuch                              # open the TUI
-logbuch --summary daily              # generate daily report and exit
-logbuch --summary weekly             # generate weekly report and exit
-logbuch --show-config                # print effective configuration and exit
-logbuch --config /path/to/cfg.toml   # use a custom config file
-logbuch --db-path /tmp/test.db       # override database location
-logbuch --summary-dir ~/reports      # override report output directory
-logbuch --session-duration 50        # override default session length (minutes)
+logbuch status || logbuch start 4
 ```
 
-## TUI Overview
+## Pomodoro sessions
 
-Logbuch uses a modal interface similar to Vim. There are three main views:
+`logbuch start <id>` records the session in the database and spawns a detached
+background process that sleeps for the session duration, marks it complete in
+the database, and fires a desktop notification. Your shell prompt returns
+immediately.
 
-```
-┌─────────────┬──────────────┬──────────────┐
-│    Inbox    │  In Progress │   Backlog    │
-│─────────────│──────────────│──────────────│
-│ >> Task A   │  Task C      │  Task E      │
-│    Task B   │  Task D      │              │
-└─────────────┴──────────────┴──────────────┘
-  [ n:new  d:delete  H/L:move  Enter:open  ?:help ]
-```
+`logbuch stop` kills the background process and marks the session ended.
 
-### Board View
+`logbuch resume` starts a new session on whichever task you worked on most
+recently — useful for picking up where you left off after a break.
 
-The starting view shows all tasks across three columns.
-
-| Key | Action |
-|-----|--------|
-| `h` / `←` | Focus left column |
-| `l` / `→` | Focus right column |
-| `j` / `↓` | Select next task |
-| `k` / `↑` | Select previous task |
-| `Enter` | Open task detail |
-| `n` | New task (type description, Enter to confirm) |
-| `d` | Delete selected task (press `d` again to confirm) |
-| `H` | Move task left (Shift+h) |
-| `L` | Move task right (Shift+l) |
-| `r d` | Generate daily summary report |
-| `r w` | Generate weekly summary report |
-| `/` | Open fuzzy search overlay |
-| `q` | Quit |
-| `?` | Toggle help |
-
-### Task Detail View
-
-Opens when you press `Enter` on a task. Three sections — Description, Todos, Sessions — cycle with `Tab`.
+## `list` output
 
 ```
-┌─ Task: Fix login bug ────────────────────────────────┐
-│ List: In Progress | Created: 2026-03-01 09:00        │
-├─ Description ────────────────────────────────────────┤
-│ Investigate why JWT refresh fails after 1h.          │
-├─ Todos (3) ──────────────────────────────────────────┤
-│ >> [ ] Reproduce with curl                           │
-│    [x] Read refresh token docs                       │
-│    [ ] Write regression test                         │
-├─ Sessions (2, 0h 50m) ───────────────────────────────┤
-│ >> 2026-03-01 09:00 - 09:25 (25m) "tried curl"      │
-│    2026-03-01 10:00 - 10:25 (25m)                    │
-├─ Session Notes ──────────────────────────────────────┤
-│ tried curl -X POST /auth/refresh — returns 401 after │
-│ token expiry.                                        │
-└──────────────────────────────────────────────────────┘
+  Inbox
+  #1    write unit tests
+  #3    update README
+
+  In Progress
+  #4    fix login redirect              ▶ 18:42 remaining
+        [ ] 1  investigate redirect chain
+        [x] 2  reproduce with test case
+        [ ] 3  patch and verify
+
+  Backlog
+  #2    migrate to postgres
 ```
 
-#### Navigation
+In-progress tasks show their active session countdown and todos inline.
+Empty sections are omitted.
 
-| Key | Action |
-|-----|--------|
-| `Tab` / `Shift+Tab` | Next / previous section |
-| `j` / `↓` | Select next item in active section |
-| `k` / `↑` | Select previous item in active section |
-| `Esc` | Back to board |
-| `?` | Toggle help |
-
-#### Description section
-
-| Key | Action |
-|-----|--------|
-| `e` | Edit description (confirm with Enter, cancel with Esc) |
-
-#### Todos section
-
-| Key | Action |
-|-----|--------|
-| `a` | Add todo |
-| `x` | Toggle todo done/undone |
-| `e` | Edit selected todo description |
-| `D` | Delete selected todo (press `D` again to confirm) |
-| `J` | Move todo down (Shift+j) |
-| `K` | Move todo up (Shift+k) |
-
-#### Sessions section
-
-| Key | Action |
-|-----|--------|
-| `s` | Start a new session (prompts for duration in minutes) |
-| `D` | Delete selected session (press `D` again to confirm) |
-
-The **Session Notes** panel below the list always shows the full notes for the selected session.
-
-### Session View
-
-When a session is active, Logbuch switches to a full-screen timer view.
+## `show` output
 
 ```
-┌─ Session: Fix login bug ────────────────────────────┐
-│                                                     │
-│         ████████████████░░░░░░░░  18:43 left        │
-│                                                     │
-│  Notes                                              │
-│  > curl reproduces it — token_exp claim missing     │
-│                                                     │
-│  [ Enter:submit note   Esc:end session ]            │
-└─────────────────────────────────────────────────────┘
+  #4    fix login redirect    In Progress
+  ────────────────────────────────────────
+
+  Todos
+  [ ] 1  investigate redirect chain
+  [x] 2  reproduce with test case
+  [ ] 3  patch and verify
+
+  Sessions
+  2026-03-05 09:00  45m
+    14:03  checked the middleware stack
+    14:17  the issue is in the OAuth callback
 ```
 
-| Key | Action |
-|-----|--------|
-| Any character | Start typing a note line |
-| `Enter` | Submit current note line |
-| `Esc` | End the session early and return to task detail |
-
-Notes are appended to the session one line at a time. When the timer reaches zero, the session ends automatically and a desktop notification fires.
-
-### Fuzzy Search Overlay
-
-Press `/` from any view to open the search overlay.
+## `log` output
 
 ```
-┌─ Search tasks ───────────────────────────────┐
-│ / log_                                       │
-│─────────────────────────────────────────────│
-│ >> [Inbox]       Login page flicker          │
-│    [In Progress] Fix login bug               │
-│    [Backlog]     Log rotation setup          │
-└──────────────────────────────────────────────┘
+  Friday 6 Mar 2026
+  ─────────────────────────────────────────────
+  fix login redirect           09:00–09:45   45m
+  write unit tests             10:00–10:45   45m
+  ─────────────────────────────────────────────
+  Total                                      90m
+
+  Completed todos
+  [x] reproduce with test case       fix login redirect
 ```
 
-| Key | Action |
-|-----|--------|
-| Type | Filter tasks (subsequence / fuzzy match) |
-| `↑` / `↓` | Navigate results |
-| `Enter` | Open highlighted task detail |
-| `Esc` | Dismiss |
+Weekend days are omitted from range reports unless they have activity.
 
 ## Configuration
 
 Settings are resolved in priority order (highest wins):
 
-1. **CLI flags** — `--db-path`, `--summary-dir`, `--session-duration`
-2. **Environment variables** — `LOGBUCH_DB_PATH`, `LOGBUCH_SUMMARY_DIR`, `LOGBUCH_SESSION_DURATION`
-3. **Config file** — `~/.config/logbuch/config.toml`
-4. **Built-in defaults**
+1. CLI flags — `--db`, `--config`
+2. Environment variables — `LOGBUCH_DB_PATH`, `LOGBUCH_SESSION_DURATION`
+3. Config file — `~/.config/logbuch/config.toml`
+4. Built-in defaults
 
 ### Config file
-
-Created automatically with commented-out defaults on first run. Edit any value:
 
 ```toml
 # ~/.config/logbuch/config.toml
 
-# Duration of a new session in minutes (default: 25)
-# session_duration_min = 25
+# Duration of a new session in minutes (default: 45)
+# session_duration_min = 45
 
-# Where summary reports are written (default: ~/logbuch-reports)
-# summary_export_dir = "~/logbuch-reports"
-
-# SQLite database location (default: ~/.local/share/logbuch/logbuch.db)
+# SQLite database path (default: ~/.local/share/logbuch/logbuch.db)
 # db_path = "~/.local/share/logbuch/logbuch.db"
 ```
 
-Paths support `~` expansion. Use a custom config file with `--config /path/to/cfg.toml`.
+Paths support `~` expansion.
 
 ### Environment variables
 
 ```bash
-export LOGBUCH_DB_PATH=~/.local/share/logbuch/logbuch.db
-export LOGBUCH_SUMMARY_DIR=~/logbuch-reports
-export LOGBUCH_SESSION_DURATION=25   # minutes
+export LOGBUCH_DB_PATH=~/.local/share/logbuch/work.db
+export LOGBUCH_SESSION_DURATION=60
 ```
-
-Useful for switching between databases without editing the config file (e.g. work vs personal).
-
-### Inspect effective configuration
-
-```bash
-logbuch --show-config
-```
-
-Prints the config file path and every resolved value so you can see exactly which source won.
 
 ## Data
 
 | Path | Contents |
 |------|----------|
 | `~/.local/share/logbuch/logbuch.db` | SQLite database (tasks, todos, sessions) |
+| `~/.local/share/logbuch/notify.pid` | PID of the running notifier (if a session is active) |
 | `~/.config/logbuch/config.toml` | User config |
-| `~/logbuch-reports/` | Generated Markdown reports |
-
-## Summary Reports
-
-`r d` (daily) and `r w` (weekly) generate Markdown files in `summary_export_dir`. Each report lists completed todos and finished work sessions grouped by task, with total time tracked.
 
 ## Development
 
 ```bash
-cargo build           # debug build
-cargo test            # run tests
-cargo fmt --all       # format
-cargo clippy --all-targets --all-features  # lint
+cargo build
+cargo test
+cargo fmt --all
+cargo clippy --all-targets --all-features
 ```
 
 ### Pre-commit hook
 
-The repository ships a pre-commit hook that runs `cargo fmt --check` and `cargo clippy` before every commit, matching the CI checks. Activate it once after cloning:
-
 ```bash
 git config core.hooksPath .githooks
 ```
+
+Runs `cargo fmt --check` and `cargo clippy` before every commit.
 
 ## License
 

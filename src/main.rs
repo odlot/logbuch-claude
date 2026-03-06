@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 use logbuch::cmd::{log as cmd_log, sessions, tasks, todos};
 use logbuch::config::Config;
 use logbuch::db;
+use logbuch::db::queries;
 use logbuch::output::Out;
 
 #[derive(Parser)]
@@ -96,6 +97,12 @@ enum Commands {
     },
     /// Cancel the running session
     Stop,
+    /// Start a new session on the most recently worked task
+    Resume {
+        /// Session duration in minutes (default: config value)
+        #[arg(long, value_name = "N")]
+        min: Option<u32>,
+    },
     /// Attach a timestamped note to the active session (alias: n)
     #[command(alias = "n")]
     Note {
@@ -104,9 +111,19 @@ enum Commands {
     },
     /// Show the running session and time remaining (exits 1 if no session)
     Status,
-    /// Daily or weekly summary
+    /// Show activity for a date or date range
+    ///
+    /// Usage:
+    ///   logbuch log              # today
+    ///   logbuch log --week       # this week (Mon–Sun)
+    ///   logbuch log 2026-03-05   # specific date
+    ///   logbuch log 2026-03-01 2026-03-07   # date range
     Log {
-        /// Show this week instead of today
+        /// Start date (yyyy-mm-dd), default: today
+        from: Option<String>,
+        /// End date (yyyy-mm-dd), default: same as start date
+        to: Option<String>,
+        /// Show the current week (Mon–Sun)
         #[arg(long)]
         week: bool,
     },
@@ -135,7 +152,6 @@ fn run() -> Result<()> {
     let command = match cli.command {
         Some(c) => c,
         None => {
-            // No subcommand: print usage and exit 0
             use clap::CommandFactory;
             Cli::command().print_help()?;
             println!();
@@ -143,7 +159,7 @@ fn run() -> Result<()> {
         }
     };
 
-    // The hidden _notify subcommand runs without loading the full config.
+    // _notify runs without loading the full config
     if let Commands::Notify {
         session_id,
         seconds,
@@ -153,13 +169,16 @@ fn run() -> Result<()> {
         return sessions::notify_process(*session_id, *seconds, db_path);
     }
 
-    // Load config (env vars + config file + CLI flag overrides)
     let mut config = Config::load(cli.config.as_ref())?;
     if let Some(p) = cli.db {
         config.db_path = p;
     }
 
     let conn = db::init(&config.db_path)?;
+
+    // Close any sessions left open by a crashed notifier
+    let _ = queries::close_orphaned_sessions(&conn);
+
     let out = Out::new();
 
     match command {
@@ -200,6 +219,10 @@ fn run() -> Result<()> {
         Commands::Stop => {
             sessions::stop(&conn, &config.db_path)?;
         }
+        Commands::Resume { min } => {
+            let duration = min.unwrap_or(config.session_duration_min);
+            sessions::resume(&conn, duration, &config.db_path)?;
+        }
         Commands::Note { text } => {
             sessions::note(&conn, &text.join(" "))?;
         }
@@ -209,12 +232,8 @@ fn run() -> Result<()> {
                 process::exit(exit_code);
             }
         }
-        Commands::Log { week } => {
-            if week {
-                cmd_log::log_weekly(&conn, &out)?;
-            } else {
-                cmd_log::log_daily(&conn, &out)?;
-            }
+        Commands::Log { from, to, week } => {
+            cmd_log::run(&conn, &out, from.as_deref(), to.as_deref(), week)?;
         }
         Commands::Notify { .. } => unreachable!(),
     }

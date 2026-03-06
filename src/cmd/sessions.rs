@@ -140,6 +140,14 @@ pub fn status(conn: &Connection, out: &Out) -> Result<i32> {
     }
 }
 
+/// Resume a session on the most recently worked task.
+pub fn resume(conn: &Connection, duration_min: u32, db_path: &Path) -> Result<()> {
+    let task_id = queries::last_worked_task(conn)?.ok_or_else(|| {
+        anyhow::anyhow!("No previous session found. Use `logbuch start <id>` instead.")
+    })?;
+    start(conn, task_id, duration_min, db_path)
+}
+
 /// Internal hidden subcommand: sleeps, then marks the session complete and fires a notification.
 pub fn notify_process(session_id: i64, seconds: u64, db_path: &Path) -> Result<()> {
     std::thread::sleep(std::time::Duration::from_secs(seconds));
