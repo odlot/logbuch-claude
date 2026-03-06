@@ -5,7 +5,7 @@ on:
     branches: [develop]
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 jobs:
@@ -13,18 +13,45 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: develop
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      # If the tag for the current version already exists, bump the patch
+      # version in develop so the release PR always carries a fresh version.
+      - name: Bump patch version if tag already exists
+        run: |
+          version=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          if git ls-remote --tags origin | grep -q "refs/tags/v$version$"; then
+            major=$(echo "$version" | cut -d. -f1)
+            minor=$(echo "$version" | cut -d. -f2)
+            patch=$(echo "$version" | cut -d. -f3)
+            new_version="$major.$minor.$((patch + 1))"
+            echo "Tag v$version exists — bumping to $new_version"
+            sed -i "0,/^version = \"$version\"/s//version = \"$new_version\"/" Cargo.toml
+            # Update Cargo.lock without a full network fetch
+            cargo generate-lockfile
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add Cargo.toml Cargo.lock
+            git commit -m "chore: bump version to $new_version"
+            git push origin develop
+          else
+            echo "Tag v$version does not exist — no bump needed"
+          fi
 
       - name: Create PR from develop to main
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           existing=$(gh pr list --base main --head develop --state open --json number --jq '.[0].number')
           if [ -n "$existing" ]; then
             echo "PR #$existing already exists, skipping."
             exit 0
           fi
+          version=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
           gh pr create \
             --base main \
             --head develop \
             --title "Release: develop → main" \
-            --body "Automated PR to merge develop into main for release."
+            --body "Automated release PR for v$version. Merge with **Create a merge commit** (not squash)."
