@@ -18,6 +18,7 @@ impl TaskList {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "inbox" => Some(TaskList::Inbox),
@@ -74,4 +75,6 @@ pub struct Task {
     pub position: i32,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+    /// Days since the last session, or since creation if never worked on.
+    pub days_inactive: u32,
 }

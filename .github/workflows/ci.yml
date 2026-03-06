@@ -47,13 +47,25 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Run coverage
-        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+        run: |
+          cargo llvm-cov --all-features --tests \
+            --ignore-filename-regex 'src/(app|event|wizard|main)\.rs|src/ui/' \
+            --lcov --output-path lcov.info
+
+      - name: Enforce coverage gate (≥90 % on testable modules)
+        run: |
+          cargo llvm-cov --all-features --tests --no-run \
+            --ignore-filename-regex 'src/(app|event|wizard|main)\.rs|src/ui/' \
+            --fail-under-lines 90
 
       - name: Write coverage summary
+        if: always()
         run: |
           echo "## Coverage Report" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          cargo llvm-cov --all-features --summary-only 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          cargo llvm-cov --all-features --tests --no-run \
+            --ignore-filename-regex 'src/(app|event|wizard|main)\.rs|src/ui/' \
+            --summary-only 2>&1 | tee -a $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload lcov report
