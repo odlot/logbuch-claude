@@ -47,13 +47,13 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Run coverage
-        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+        run: cargo llvm-cov --all-features --tests --lcov --output-path lcov.info
 
       - name: Write coverage summary
         run: |
           echo "## Coverage Report" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          cargo llvm-cov --all-features --summary-only 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+          cargo llvm-cov --all-features --tests --no-run --summary-only 2>&1 | tee -a $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload lcov report
