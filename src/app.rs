@@ -337,11 +337,22 @@ impl App {
         self.status_message = Some((msg.into(), Instant::now()));
     }
 
+    /// Returns the byte index in `input_buffer` that corresponds to the current
+    /// char-based `input_cursor`. `String::insert` and `String::remove` require
+    /// byte indices, so every mutation goes through this helper.
+    fn input_byte_idx(&self) -> usize {
+        self.input_buffer
+            .char_indices()
+            .nth(self.input_cursor)
+            .map(|(i, _)| i)
+            .unwrap_or(self.input_buffer.len())
+    }
+
     fn start_input(&mut self, target: InputTarget, prefill: &str) {
         self.input_mode = InputMode::Editing;
         self.input_target = target;
         self.input_buffer = prefill.to_string();
-        self.input_cursor = self.input_buffer.len();
+        self.input_cursor = self.input_buffer.chars().count();
     }
 
     fn cancel_input(&mut self) {
@@ -410,14 +421,14 @@ impl App {
                 }
             }
             KeyCode::Char(c) => {
-                self.input_buffer.insert(self.input_cursor, c);
+                self.input_buffer.insert(self.input_byte_idx(), c);
                 self.input_cursor += 1;
                 self.update_search_results();
             }
             KeyCode::Backspace => {
                 if self.input_cursor > 0 {
                     self.input_cursor -= 1;
-                    self.input_buffer.remove(self.input_cursor);
+                    self.input_buffer.remove(self.input_byte_idx());
                     self.update_search_results();
                 }
             }
@@ -427,7 +438,7 @@ impl App {
                 }
             }
             KeyCode::Right => {
-                if self.input_cursor < self.input_buffer.len() {
+                if self.input_cursor < self.input_buffer.chars().count() {
                     self.input_cursor += 1;
                 }
             }
@@ -530,13 +541,13 @@ impl App {
                 self.cancel_input();
             }
             KeyCode::Char(c) => {
-                self.input_buffer.insert(self.input_cursor, c);
+                self.input_buffer.insert(self.input_byte_idx(), c);
                 self.input_cursor += 1;
             }
             KeyCode::Backspace => {
                 if self.input_cursor > 0 {
                     self.input_cursor -= 1;
-                    self.input_buffer.remove(self.input_cursor);
+                    self.input_buffer.remove(self.input_byte_idx());
                 }
             }
             KeyCode::Left => {
@@ -545,7 +556,7 @@ impl App {
                 }
             }
             KeyCode::Right => {
-                if self.input_cursor < self.input_buffer.len() {
+                if self.input_cursor < self.input_buffer.chars().count() {
                     self.input_cursor += 1;
                 }
             }
@@ -553,7 +564,7 @@ impl App {
                 self.input_cursor = 0;
             }
             KeyCode::End => {
-                self.input_cursor = self.input_buffer.len();
+                self.input_cursor = self.input_buffer.chars().count();
             }
             _ => {}
         }

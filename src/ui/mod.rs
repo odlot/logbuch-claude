@@ -145,30 +145,42 @@ fn draw_search_overlay(frame: &mut Frame, app: &App) {
     }
 }
 
-pub fn status_bar_text(app: &App) -> String {
-    let mut parts = Vec::new();
+/// Renders the one-line status bar at the bottom of any view.
+///
+/// When a status message is active it is shown in green, replacing the
+/// keybinding hints so it is immediately visible. The session countdown
+/// is always shown on the right when a session is running.
+pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let indicator = session_indicator(app).unwrap_or_default();
+    let left_width = area.width.saturating_sub(indicator.len() as u16 + 1);
+    let bar_chunks =
+        Layout::horizontal([Constraint::Length(left_width), Constraint::Min(1)]).split(area);
 
-    let (_, bindings) = bindings_for_view(&app.view);
-    let hint = bindings
-        .iter()
-        .take(6)
-        .map(|kb| {
-            format!(
-                "{}:{}",
-                kb.keys,
-                kb.description.split(' ').next().unwrap_or("")
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("  ");
-    parts.push(hint);
-    parts.push("?:help".to_string());
+    let left = if let Some((msg, _)) = &app.status_message {
+        Paragraph::new(msg.as_str()).style(Style::default().fg(Color::Green))
+    } else {
+        let (_, bindings) = bindings_for_view(&app.view);
+        let hint = bindings
+            .iter()
+            .take(6)
+            .map(|kb| {
+                format!(
+                    "{}:{}",
+                    kb.keys,
+                    kb.description.split(' ').next().unwrap_or("")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("  ");
+        Paragraph::new(format!("{}  ?:help", hint)).style(Style::default().fg(Color::DarkGray))
+    };
 
-    if let Some((msg, _)) = &app.status_message {
-        parts.push(msg.clone());
-    }
+    let right = Paragraph::new(indicator)
+        .style(Style::default().fg(Color::Green))
+        .alignment(Alignment::Right);
 
-    parts.join(" | ")
+    frame.render_widget(left, bar_chunks[0]);
+    frame.render_widget(right, bar_chunks[1]);
 }
 
 pub fn session_indicator(app: &App) -> Option<String> {

@@ -121,17 +121,5 @@ pub fn draw(frame: &mut Frame, app: &mut App, _session_id: i64) {
     }
 
     // Status bar
-    let status = super::status_bar_text(app);
-    let indicator = super::session_indicator(app).unwrap_or_default();
-
-    let left_width = chunks[4].width.saturating_sub(indicator.len() as u16 + 1);
-    let bar_chunks =
-        Layout::horizontal([Constraint::Length(left_width), Constraint::Min(1)]).split(chunks[4]);
-
-    let left = Paragraph::new(status).style(Style::default().fg(Color::DarkGray));
-    let right = Paragraph::new(indicator)
-        .style(Style::default().fg(Color::Green))
-        .alignment(Alignment::Right);
-    frame.render_widget(left, bar_chunks[0]);
-    frame.render_widget(right, bar_chunks[1]);
+    super::draw_status_bar(frame, app, chunks[4]);
 }
