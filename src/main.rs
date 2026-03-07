@@ -127,6 +127,21 @@ enum Commands {
         #[arg(long)]
         week: bool,
     },
+    /// Print a shell completion script to stdout
+    ///
+    /// Usage:
+    ///   logbuch completions bash >> ~/.bash_completion
+    ///   source <(logbuch completions bash)
+    Completions {
+        /// Shell to generate completions for (bash)
+        shell: String,
+    },
+    /// Internal: list all tasks for shell completion (hidden)
+    #[command(hide = true, name = "_tasks")]
+    Tasks,
+    /// Internal: list todos for a task for shell completion (hidden)
+    #[command(hide = true, name = "_todos")]
+    Todos { task_id: i64 },
     /// Internal: detached notifier process (hidden)
     #[command(hide = true)]
     Notify {
@@ -138,6 +153,115 @@ enum Commands {
         db: PathBuf,
     },
 }
+
+const BASH_COMPLETION: &str = r#"# bash completion for logbuch
+# Install: source <(logbuch completions bash)
+#      or: logbuch completions bash >> ~/.bash_completion
+
+_logbuch() {
+    local cur prev words cword
+    if declare -f _init_completion > /dev/null 2>&1; then
+        _init_completion || return
+    else
+        COMPREPLY=()
+        cur="${COMP_WORDS[COMP_CWORD]}"
+        prev="${COMP_WORDS[COMP_CWORD-1]}"
+        words=("${COMP_WORDS[@]}")
+        cword=$COMP_CWORD
+    fi
+
+    # Propagate --db / --config flags so helpers query the right database
+    local _LB_GLOBAL=()
+    local i
+    for (( i=1; i<${#words[@]}-1; i++ )); do
+        if [[ "${words[i]}" == "--db" || "${words[i]}" == "--config" ]]; then
+            _LB_GLOBAL+=("${words[i]}" "${words[i+1]}")
+        fi
+    done
+
+    # Find the subcommand: first non-flag, non-value word after argv[0]
+    local cmd="" cmd_idx=0
+    local skip_next=0
+    for (( i=1; i<${#words[@]}; i++ )); do
+        if [[ $skip_next -eq 1 ]]; then
+            skip_next=0
+            continue
+        fi
+        case "${words[i]}" in
+            --db|--config) skip_next=1 ;;
+            -*) ;;
+            *)  cmd="${words[i]}"; cmd_idx=$i; break ;;
+        esac
+    done
+
+    # Position of $cur relative to the subcommand (1 = first arg, 2 = second, …)
+    local subcword=$(( cword - cmd_idx ))
+
+    # No subcommand yet — complete command names
+    if [[ -z "$cmd" || $cword -le $cmd_idx ]]; then
+        local commands="add list ls show done rm defer edit todo check start stop resume note n status log completions"
+        COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+        return
+    fi
+
+    local _lb="${COMP_WORDS[0]}"
+    _lb_task_ids() { "$_lb" "${_LB_GLOBAL[@]}" _tasks 2>/dev/null | cut -f1; }
+    _lb_todo_ids() { "$_lb" "${_LB_GLOBAL[@]}" _todos "$1" 2>/dev/null | cut -f1; }
+
+    # The word at (cmd_idx + N) in the original words array
+    _lb_word() { echo "${words[$(( cmd_idx + $1 ))]}"; }
+
+    case "$cmd" in
+        show|done|defer|todo)
+            [[ $subcword -eq 1 ]] && COMPREPLY=($(compgen -W "$(_lb_task_ids)" -- "$cur"))
+            ;;
+        start)
+            if [[ $subcword -eq 1 ]]; then
+                COMPREPLY=($(compgen -W "$(_lb_task_ids)" -- "$cur"))
+            elif [[ "$prev" == "--min" ]]; then
+                COMPREPLY=($(compgen -W "25 45 60 90" -- "$cur"))
+            elif [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--min" -- "$cur"))
+            fi
+            ;;
+        rm)
+            if [[ $subcword -eq 1 ]]; then
+                COMPREPLY=($(compgen -W "$(_lb_task_ids)" -- "$cur"))
+            elif [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--yes" -- "$cur"))
+            fi
+            ;;
+        edit)
+            case $subcword in
+                1) COMPREPLY=($(compgen -W "$(_lb_task_ids)" -- "$cur")) ;;
+                2) COMPREPLY=($(compgen -W "$(_lb_todo_ids "$(_lb_word 1)")" -- "$cur")) ;;
+            esac
+            ;;
+        check)
+            case $subcword in
+                1) COMPREPLY=($(compgen -W "$(_lb_task_ids)" -- "$cur")) ;;
+                2) COMPREPLY=($(compgen -W "$(_lb_todo_ids "$(_lb_word 1)")" -- "$cur")) ;;
+            esac
+            ;;
+        resume)
+            if [[ "$prev" == "--min" ]]; then
+                COMPREPLY=($(compgen -W "25 45 60 90" -- "$cur"))
+            elif [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--min" -- "$cur"))
+            fi
+            ;;
+        log)
+            [[ "$cur" == -* ]] && COMPREPLY=($(compgen -W "--week" -- "$cur"))
+            ;;
+        completions)
+            [[ $subcword -eq 1 ]] && COMPREPLY=($(compgen -W "bash" -- "$cur"))
+            ;;
+    esac
+}
+
+complete -F _logbuch logbuch
+complete -F _logbuch lb
+"#;
 
 fn main() {
     if let Err(e) = run() {
@@ -159,14 +283,23 @@ fn run() -> Result<()> {
         }
     };
 
-    // _notify runs without loading the full config
-    if let Commands::Notify {
-        session_id,
-        seconds,
-        db: db_path,
-    } = &command
-    {
-        return sessions::notify_process(*session_id, *seconds, db_path);
+    // Commands that run without config or DB
+    match &command {
+        Commands::Notify {
+            session_id,
+            seconds,
+            db: db_path,
+        } => return sessions::notify_process(*session_id, *seconds, db_path),
+        Commands::Completions { shell } => {
+            return match shell.as_str() {
+                "bash" => {
+                    print!("{}", BASH_COMPLETION);
+                    Ok(())
+                }
+                other => anyhow::bail!("Unsupported shell '{}'. Supported: bash", other),
+            };
+        }
+        _ => {}
     }
 
     let mut config = Config::load(cli.config.as_ref())?;
@@ -235,7 +368,23 @@ fn run() -> Result<()> {
         Commands::Log { from, to, week } => {
             cmd_log::run(&conn, &out, from.as_deref(), to.as_deref(), week)?;
         }
-        Commands::Notify { .. } => unreachable!(),
+        Commands::Tasks => {
+            for list in &[
+                logbuch::model::TaskList::Inbox,
+                logbuch::model::TaskList::InProgress,
+                logbuch::model::TaskList::Backlog,
+            ] {
+                for task in queries::list_tasks(&conn, list)? {
+                    println!("{}\t{}", task.id, task.description);
+                }
+            }
+        }
+        Commands::Todos { task_id } => {
+            for todo in queries::list_todos(&conn, task_id)? {
+                println!("{}\t{}", todo.id, todo.description);
+            }
+        }
+        Commands::Completions { .. } | Commands::Notify { .. } => unreachable!(),
     }
 
     Ok(())
