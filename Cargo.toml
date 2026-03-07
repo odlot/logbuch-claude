@@ -1,6 +1,6 @@
 [package]
 name = "logbuch"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2021"
 description = "Developer productivity — tasks, todos, pomodoro sessions"
 license = "GPL-3.0-only"
