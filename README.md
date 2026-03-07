@@ -160,6 +160,59 @@ export LOGBUCH_SESSION_DURATION=60
 | `~/.local/share/logbuch/notify.pid` | PID of the running notifier (if a session is active) |
 | `~/.config/logbuch/config.toml` | User config |
 
+## Shell completions
+
+Tab-completion for command names, task IDs, todo IDs, and flag values.
+
+### Install (one-time)
+
+**Option A — source directly:**
+
+```bash
+source <(logbuch completions bash)
+```
+
+Add this line to your `~/.bashrc` (or `~/.bash_profile`) to make it permanent.
+
+**Option B — download from release:**
+
+Download `logbuch-completions.bash` from the [GitHub Releases](https://github.com/odlot/logbuch/releases) page, then:
+
+```bash
+# System-wide
+sudo cp logbuch-completions.bash /etc/bash_completion.d/logbuch
+
+# Or per-user
+mkdir -p ~/.local/share/bash-completion/completions
+cp logbuch-completions.bash ~/.local/share/bash-completion/completions/logbuch
+```
+
+### What completes
+
+| Context | Completion |
+|---------|-----------|
+| `logbuch <Tab>` | all command names |
+| `logbuch show <Tab>` | task IDs from the database |
+| `logbuch start <Tab>` | task IDs; `--min` flag |
+| `logbuch start --min <Tab>` | `25 45 60 90` |
+| `logbuch done/defer/todo <Tab>` | task IDs |
+| `logbuch rm <Tab>` | task IDs; `--yes` flag |
+| `logbuch edit <task-id> <Tab>` | todo IDs for that task |
+| `logbuch check <task-id> <Tab>` | todo IDs for that task |
+| `logbuch resume --min <Tab>` | `25 45 60 90` |
+| `logbuch log <Tab>` | `--week` flag |
+| `logbuch completions <Tab>` | `bash` |
+
+Task and todo IDs are looked up live from the database. `--db` and `--config`
+flags are forwarded automatically when set, so completions always query the
+right database.
+
+The `lb` alias is completed too if you define it:
+
+```bash
+alias lb=logbuch
+```
+
 ## Development
 
 ```bash
