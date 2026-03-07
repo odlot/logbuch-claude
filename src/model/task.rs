@@ -5,7 +5,6 @@ pub enum TaskList {
     Inbox,
     InProgress,
     Backlog,
-    Done,
 }
 
 impl TaskList {
@@ -14,7 +13,6 @@ impl TaskList {
             TaskList::Inbox => "inbox",
             TaskList::InProgress => "in_progress",
             TaskList::Backlog => "backlog",
-            TaskList::Done => "done",
         }
     }
 
@@ -24,7 +22,6 @@ impl TaskList {
             "inbox" => Some(TaskList::Inbox),
             "in_progress" => Some(TaskList::InProgress),
             "backlog" => Some(TaskList::Backlog),
-            "done" => Some(TaskList::Done),
             _ => None,
         }
     }
@@ -34,40 +31,11 @@ impl TaskList {
             TaskList::Inbox => "Inbox",
             TaskList::InProgress => "In Progress",
             TaskList::Backlog => "Backlog",
-            TaskList::Done => "Done",
-        }
-    }
-
-    pub fn index(&self) -> usize {
-        match self {
-            TaskList::Inbox => 0,
-            TaskList::InProgress => 1,
-            TaskList::Backlog => 2,
-            TaskList::Done => 3,
-        }
-    }
-
-    pub fn left(&self) -> Option<Self> {
-        match self {
-            TaskList::Inbox => None,
-            TaskList::InProgress => Some(TaskList::Inbox),
-            TaskList::Backlog => Some(TaskList::InProgress),
-            TaskList::Done => None,
-        }
-    }
-
-    pub fn right(&self) -> Option<Self> {
-        match self {
-            TaskList::Inbox => Some(TaskList::InProgress),
-            TaskList::InProgress => Some(TaskList::Backlog),
-            TaskList::Backlog => None,
-            TaskList::Done => None,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct Task {
     pub id: i64,
     pub description: String,
@@ -75,6 +43,4 @@ pub struct Task {
     pub position: i32,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
-    /// Days since the last session, or since creation if never worked on.
-    pub days_inactive: u32,
 }

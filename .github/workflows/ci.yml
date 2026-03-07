@@ -49,13 +49,13 @@ jobs:
       - name: Run coverage
         run: |
           cargo llvm-cov --all-features --tests \
-            --ignore-filename-regex 'src/(app|event|wizard|main)\.rs|src/ui/' \
+            --ignore-filename-regex 'src/(main|output)\.rs|src/cmd/' \
             --lcov --output-path lcov.info
 
       - name: Enforce coverage gate (≥90 % on testable modules)
         run: |
           cargo llvm-cov --all-features --tests --no-run \
-            --ignore-filename-regex 'src/(app|event|wizard|main)\.rs|src/ui/' \
+            --ignore-filename-regex 'src/(main|output)\.rs|src/cmd/' \
             --fail-under-lines 90
 
       - name: Write coverage summary
@@ -64,7 +64,7 @@ jobs:
           echo "## Coverage Report" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           cargo llvm-cov --all-features --tests --no-run \
-            --ignore-filename-regex 'src/(app|event|wizard|main)\.rs|src/ui/' \
+            --ignore-filename-regex 'src/(main|output)\.rs|src/cmd/' \
             --summary-only 2>&1 | tee -a $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 

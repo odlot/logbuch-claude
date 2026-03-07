@@ -5,10 +5,8 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Duration of a new session in minutes (default: 25)
+    /// Duration of a new session in minutes (default: 45)
     pub session_duration_min: u32,
-    /// Directory where summary reports are written
-    pub summary_export_dir: PathBuf,
     /// Path to the SQLite database file
     pub db_path: PathBuf,
 }
@@ -19,8 +17,7 @@ impl Default for Config {
             .unwrap_or_else(|| PathBuf::from("."))
             .join("logbuch");
         Self {
-            session_duration_min: 25,
-            summary_export_dir: data_dir.join("reports"),
+            session_duration_min: 45,
             db_path: data_dir.join("logbuch.db"),
         }
     }
@@ -56,7 +53,6 @@ impl Config {
 
         // Expand `~` in paths supplied via the config file.
         config.db_path = expand_tilde(config.db_path);
-        config.summary_export_dir = expand_tilde(config.summary_export_dir);
 
         // Apply environment variable overrides.
         config.apply_env_overrides();
@@ -68,9 +64,6 @@ impl Config {
     pub fn apply_env_overrides(&mut self) {
         if let Ok(val) = std::env::var("LOGBUCH_DB_PATH") {
             self.db_path = expand_tilde(PathBuf::from(val));
-        }
-        if let Ok(val) = std::env::var("LOGBUCH_SUMMARY_DIR") {
-            self.summary_export_dir = expand_tilde(PathBuf::from(val));
         }
         if let Ok(val) = std::env::var("LOGBUCH_SESSION_DURATION") {
             if let Ok(mins) = val.parse::<u32>() {
@@ -92,20 +85,15 @@ impl Config {
         }
         let content = format!(
             r#"# Logbuch configuration
-# Edit any value and restart the app to apply changes.
 # Full documentation: https://github.com/odlot/logbuch
 
-# Duration of a new Pomodoro session in minutes.
+# Duration of a new session in minutes (default: 45).
 session_duration_min = {duration}
-
-# Directory where daily/weekly summary reports are written (Markdown).
-summary_export_dir = "{summary}"
 
 # Path to the SQLite database file.
 db_path = "{db}"
 "#,
             duration = self.session_duration_min,
-            summary = self.summary_export_dir.display(),
             db = self.db_path.display(),
         );
         std::fs::write(path, content)
@@ -118,12 +106,10 @@ db_path = "{db}"
         println!("Logbuch effective configuration");
         println!("  Config file:      {}", config_path.display());
         println!("  Database:         {}", self.db_path.display());
-        println!("  Reports dir:      {}", self.summary_export_dir.display());
         println!("  Session duration: {} minutes", self.session_duration_min);
         println!();
         println!("Environment variable overrides (if set):");
         println!("  LOGBUCH_DB_PATH           -> db_path");
-        println!("  LOGBUCH_SUMMARY_DIR       -> summary_export_dir");
         println!("  LOGBUCH_SESSION_DURATION  -> session_duration_min");
     }
 }
