@@ -74,8 +74,27 @@ jobs:
           name: logbuch-${{ matrix.target }}
           path: logbuch-*
 
+  completions:
+    name: Shell completions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Generate bash completion script
+        run: ./target/release/logbuch completions bash > logbuch-completions.bash
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: logbuch-completions
+          path: logbuch-completions.bash
+
   release:
-    needs: build
+    needs: [build, completions]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
