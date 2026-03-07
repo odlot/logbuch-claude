@@ -495,20 +495,42 @@ fn delete_session_removes_the_session() {
 }
 
 #[test]
-fn close_orphaned_sessions_closes_every_open_session() {
-    // Arrange
+fn close_orphaned_sessions_closes_past_due_open_sessions() {
+    // Arrange: two sessions whose scheduled end time is in the past
     let conn = setup();
     let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
-    queries::start_session(&conn, task_id, 25).unwrap();
-    queries::start_session(&conn, task_id, 25).unwrap();
+    for _ in 0..2 {
+        conn.execute(
+            "INSERT INTO session (task_id, begin_at, duration_min, notes)
+             VALUES (?1, '2020-01-01T00:00:00', 25, '')",
+            [task_id],
+        )
+        .unwrap();
+    }
 
     // Act
     let closed = queries::close_orphaned_sessions(&conn).unwrap();
 
-    // Assert
+    // Assert: both past-due sessions are closed
     assert_eq!(closed, 2);
     let active = queries::get_active_session(&conn).unwrap();
     assert!(active.is_none());
+}
+
+#[test]
+fn close_orphaned_sessions_does_not_close_active_session() {
+    // Arrange: one session that is still within its duration (starts now, runs 45 min)
+    let conn = setup();
+    let task_id = queries::insert_task(&conn, "Task", &TaskList::Inbox).unwrap();
+    queries::start_session(&conn, task_id, 45).unwrap();
+
+    // Act
+    let closed = queries::close_orphaned_sessions(&conn).unwrap();
+
+    // Assert: active session is untouched
+    assert_eq!(closed, 0);
+    let active = queries::get_active_session(&conn).unwrap();
+    assert!(active.is_some());
 }
 
 #[test]
