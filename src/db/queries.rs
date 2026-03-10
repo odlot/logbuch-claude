@@ -292,7 +292,9 @@ pub fn close_orphaned_sessions(conn: &Connection) -> Result<u32> {
     let count = conn.execute(
         "UPDATE session SET end_at = strftime('%Y-%m-%dT%H:%M:%S',
             datetime(begin_at, '+' || duration_min || ' minutes'))
-         WHERE end_at IS NULL",
+         WHERE end_at IS NULL
+           AND datetime(begin_at, '+' || duration_min || ' minutes')
+               < datetime('now', 'localtime')",
         [],
     )?;
     Ok(count as u32)
